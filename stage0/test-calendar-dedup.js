@@ -50,8 +50,9 @@ function harness({ initial = [], loseInsert = false, failPatch = false, failCrea
         return reply(resource);
       }
       if (route.pathname.endsWith('/events')) {
-        const key = route.searchParams.getAll('privateExtendedProperty').find((value) => value.startsWith('assignmentId=')).slice(13);
-        const matching = events.filter((event) => event.extendedProperties?.private?.assignmentId === key);
+        const filter = route.searchParams.getAll('privateExtendedProperty').find((value) => value.startsWith('assignmentId='));
+        const matching = events.filter((event) => event.extendedProperties?.private?.prairieRun === '1'
+          && (!filter || event.extendedProperties.private.assignmentId === filter.slice(13)));
         // Each page returns one result to exercise duplicate lookup pagination.
         const index = Number(route.searchParams.get('pageToken') || 0);
         return reply({ items: matching.slice(index, index + 1),
@@ -121,4 +122,26 @@ test('uncertain calendar creation is not blindly retried', async () => {
   const results = await h.api.exportAssignments([assignment]);
   assert.equal(results[0].status, 'failed');
   assert.equal(h.calls.filter((call) => call.method === 'POST').length, 1);
+});
+
+test('assessment and instance source links repair legacy events with different marker IDs', async () => {
+  const original = 'https://us.prairielearn.com/pl/course_instance/229304/assessment/2724826/';
+  const attempt = 'https://us.prairielearn.com/pl/course_instance/229304/assessment_instance/15272849/';
+  const originalEvent = marked('original', 'legacy-original');
+  originalEvent.description = `PrairieLearn source: ${original}`;
+  const attemptEvent = marked('attempt', 'legacy-attempt');
+  attemptEvent.extendedProperties.private.sourceUrl = attempt;
+  const unrelated = marked('other', 'other-assignment');
+  unrelated.description = 'PrairieLearn source: https://us.prairielearn.com/pl/course_instance/229304/assessment/2724827/';
+  const personal = { id: 'personal', description: `PrairieLearn source: ${original}` };
+  const h = harness({ initial: [originalEvent, attemptEvent, unrelated, personal] });
+  const results = await h.api.exportAssignments([{ ...assignment,
+    id: 'pl:229304:assessment:2724826', sourceUrl: attempt,
+    sourceUrls: [original, attempt], assignmentAliases: [],
+  }]);
+  assert.equal(results[0].removedDuplicates, 1);
+  assert.equal(h.events.length, 3);
+  assert.equal(h.events.find((event) => event.id === results[0].eventId).colorId, '8');
+  assert.ok(h.events.some((event) => event.id === 'other'));
+  assert.ok(h.events.some((event) => event.id === 'personal'));
 });

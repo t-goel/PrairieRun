@@ -56,6 +56,9 @@ agent-facing project rules.
 Calendar sync repairs confirmed duplicate PrairieRun events automatically:
 one event retains the assignment's latest date, completion color, and reminders.
 Extra marked copies are removed only after that event is successfully updated.
+An original assessment link and its attempt link can identify the same work
+when PrairieLearn exposes both in one assessment group. Older marked events
+are matched using those verified links even if their stored identifiers differ.
 Personal events and assignments with merely similar titles are left alone.
 
 Reloading this update and opening PrairieLearn triggers the initial duplicate

@@ -19,6 +19,12 @@ PrairieRun-marked matches in that class calendar. Unmarked and unrelated events
 are preserved; matching titles alone never authorize cleanup.
 
 A stored repair-version marker forces full reconciliation of dated assignments
+using verified sourceUrls as well as ID aliases. Calendar lookup reads all
+PrairieRun-marked events once per class calendar and checks exact assessment or
+instance routes in private metadata and the source description. This supports
+legacy events with different marker IDs without comparing assignment titles.
+
+A stored repair-version marker forces full reconciliation of dated assignments
 on the first scan after this upgrade, including past-due work. The marker and
 daily sync timestamp advance only when every exported assignment succeeds.
 Partial failures appear in the popup and leave repair due on the next scan.

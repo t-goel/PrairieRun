@@ -203,6 +203,7 @@ function extractAssignments(document, location = window.location, threshold = 95
         title: base?.title || item.title,
         label: item.baseLabel || base?.baseLabel,
         sourceUrl: resolved.sourceUrl,
+        sourceUrls: [...new Set(items.map((row) => row.sourceUrl).filter(Boolean))],
         assessmentId,
         instanceId: item.instanceId,
         assignmentAliases: items.map((row) => stableAssignmentKey({

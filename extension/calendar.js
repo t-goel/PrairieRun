@@ -162,25 +162,45 @@ async function getColorPlan(token, courseKeys) {
   return { classColors, greyColorId };
 }
 
-async function findMarkedEvents(assignment, calendarId, token) {
+function sourceIdentity(value) {
+  try {
+    const url = new URL(value);
+    const match = url.pathname.match(/^\/pl\/course_instance\/(\d+)\/(assessment|assessment_instance)\/(\d+)\/?$/);
+    return match && url.protocol === "https:" ? `${url.origin}/pl/course_instance/${match[1]}/${match[2]}/${match[3]}` : null;
+  } catch { return null; }
+}
+
+async function listMarkedEvents(calendarId, token) {
   const matches = new Map();
-  const keys = new Set([assignment.id, ...(assignment.assignmentAliases || [])]);
-  for (const key of keys) {
     let pageToken;
     do {
       const params = new URLSearchParams({ maxResults: "250", showDeleted: "false", singleEvents: "true" });
       params.append("privateExtendedProperty", "prairieRun=1");
-      params.append("privateExtendedProperty", `assignmentId=${key}`);
       if (pageToken) params.set("pageToken", pageToken);
       const result = await calendarRequest(`/calendars/${encodeURIComponent(calendarId)}/events?${params}`, {}, token);
       for (const event of result.items || []) {
         const marker = event.extendedProperties?.private;
-        if (event.id && marker?.prairieRun === "1" && keys.has(marker.assignmentId)) matches.set(event.id, event);
+        if (event.id && marker?.prairieRun === "1") matches.set(event.id, event);
       }
       pageToken = result.nextPageToken;
     } while (pageToken);
-  }
   return [...matches.values()];
+}
+
+async function findMarkedEvents(assignment, calendarId, token, cachedEvents) {
+  const keys = new Set([assignment.id, ...(assignment.assignmentAliases || [])]);
+  const sources = new Set([assignment.sourceUrl, ...(assignment.sourceUrls || [])].map(sourceIdentity).filter(Boolean));
+  const events = cachedEvents || await listMarkedEvents(calendarId, token);
+  return events.filter((event) => {
+    const marker = event.extendedProperties?.private;
+    if (marker?.prairieRun !== "1") return false;
+    const descriptionUrl = event.description?.match(/PrairieLearn source:\s*(https:\/\/[^\s<>]+)/)?.[1];
+    return keys.has(marker.assignmentId)
+      || [marker.sourceUrl, descriptionUrl].some((value) => {
+        const identity = sourceIdentity(value);
+        return identity && sources.has(identity);
+      });
+  });
 }
 
 async function exportAssignments(assignments) {
@@ -198,6 +218,7 @@ async function exportAssignmentsNow(assignments) {
   const sync = stored[CALENDAR_SYNC_KEY] || {};
   const reminderMinutes = Math.max(0, Math.min(10080, Number(stored.prairierunSettings?.notificationLeadMinutes) || 240));
   const results = [];
+  const eventCache = new Map();
   const courseKeys = [...new Set(assignments.map((assignment) => assignment.courseInstanceId || assignment.courseName))];
   const colorPlan = await getColorPlan(token, courseKeys);
   for (const assignment of assignments) {
@@ -211,7 +232,9 @@ async function exportAssignmentsNow(assignments) {
       const classColorId = colorPlan.classColors[courseKey];
       // Always verify the marked event. A user may have deleted it directly in
       // Google Calendar while the local sync record still has its old event ID.
-      const matches = await findMarkedEvents(assignment, calendar.id, token);
+      if (!eventCache.has(calendar.id)) eventCache.set(calendar.id, await listMarkedEvents(calendar.id, token));
+      const calendarEvents = eventCache.get(calendar.id);
+      const matches = await findMarkedEvents(assignment, calendar.id, token, calendarEvents);
       const generatedId = await stableEventId(assignment.id);
       const preferredId = sync[assignment.id]?.googleEventId;
       let event = matches.find((item) => item.id === preferredId)
@@ -247,6 +270,8 @@ async function exportAssignmentsNow(assignments) {
       for (const alias of assignment.assignmentAliases || []) {
         if (alias !== assignment.id) delete sync[alias];
       }
+      const removedIds = new Set(matches.map((item) => item.id));
+      eventCache.set(calendar.id, [...calendarEvents.filter((item) => !removedIds.has(item.id)), { ...event, ...resource }]);
       sync[assignment.id] = { assignmentId: assignment.id, calendarId: calendar.id, googleEventId: event.id, lastSyncedAt: new Date().toISOString(), eventFingerprint: assignment.sourceFingerprint, completionStatus: assignment.completionStatus, syncStatus: "synced" };
       results.push({ assignment, calendar, status, eventId: event.id, removedDuplicates });
     } catch (error) {

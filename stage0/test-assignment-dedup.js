@@ -34,6 +34,11 @@ for (const file of ['../extension/prairielearn-adapter.js', './prairielearn-adap
       assert.equal(assignments[0].id, 'pl:1:assessment:2');
       assert.equal(assignments[0].score, 100);
       assert.equal(assignments[0].completionStatus, 'completed');
+      assert.deepEqual(new Set(assignments[0].sourceUrls), new Set([
+        'https://us.prairielearn.com/pl/course_instance/1/assessment/2/',
+        'https://us.prairielearn.com/pl/course_instance/1/assessment_instance/3/',
+        'https://us.prairielearn.com/pl/course_instance/1/assessment_instance/4/',
+      ]));
       assert.match(assignments[0].dueAtLocal, /-10 11:00:00$/);
       assert.deepEqual(new Set(assignments[0].assignmentAliases),
         new Set(['pl:1:assessment:2', 'pl:1:instance:3', 'pl:1:instance:4']));
