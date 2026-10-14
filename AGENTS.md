@@ -105,6 +105,9 @@ live dependency even though it is not loaded as a content script.
   group. Marked legacy events can also match these exact verified source routes
   in their private sourceUrl or PrairieLearn-source description. Different
   numeric IDs are never linked by resemblance. Unmarked events remain intact.
+- Preserve verified source links and aliases across scans of the same canonical
+  ID. Newly discovered identities schedule repair even for past-due work, and
+  remain pending until the Calendar update succeeds. Repair version is now 2.
 - The repair-version marker forces a full reconciliation on the next scan
   after upgrading. Advance it and the daily-success timestamp only when all
   exported assignments succeed; expose partial failures in the popup status.

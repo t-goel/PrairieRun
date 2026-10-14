@@ -35,7 +35,27 @@ test('upgrade repairs unchanged past-due assignments, retries failures, then sto
   fail = false;
   await run();
   assert.equal(calls.length, 2);
-  assert.equal(local.prairierunCalendarRepairVersion, 1);
+  assert.equal(local.prairierunCalendarRepairVersion, 2);
   await run();
   assert.equal(calls.length, 2);
+  // Discovering a new attempt link schedules repair even after today's
+  // reconciliation, and even when the original assignment is past due.
+  input[0].sourceUrl = 'https://us.prairielearn.com/pl/course_instance/1/assessment/2/';
+  input[0].title = 'Homework';
+  local.prairierunAssignments = structuredClone(input);
+  input[0].assignmentAliases = ['pl:1:instance:3'];
+  input[0].sourceUrls = [input[0].sourceUrl,
+    'https://us.prairielearn.com/pl/course_instance/1/assessment_instance/3/'];
+  const scan = await vm.runInContext('saveScanResult(input)', context);
+  assert.ok(scan.detectedIds.has(input[0].id));
+  context.input = scan.merged;
+  context.detected = scan.detectedIds;
+  await vm.runInContext('notifyHomeTab(1, input, detected)', context);
+  assert.equal(calls.length, 3);
+  assert.equal(local.prairierunAssignments[0].identityRepairPending, false);
+  // A subsequent page omitting the attempt must not forget its verified link.
+  context.input = [{ ...input[0], sourceUrls: [], assignmentAliases: [] }];
+  const next = await vm.runInContext('saveScanResult(input)', context);
+  assert.ok(next.merged[0].sourceUrls.some((url) => url.includes('/assessment_instance/3/')));
+  assert.equal(next.detectedIds.size, 0);
 });

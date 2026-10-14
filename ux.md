@@ -65,6 +65,8 @@ Reloading this update and opening PrairieLearn triggers the initial duplicate
 repair automatically. There is no need to clear data or delete calendars.
 The popup reports failed assignments so a partial repair is not shown as a
 successful synchronization.
+This source-link repair runs again after updating, even if the earlier repair
+finished. Newly discovered attempt links also trigger repair automatically.
 The popup completion control says "Complete above" the threshold to make the
 strict comparison clear; exactly 95% is incomplete at the default threshold.
 

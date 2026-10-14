@@ -10,7 +10,7 @@ const SETTINGS_KEY = "prairierunSettings";
 const BACKGROUND_CALENDAR_SYNC_KEY = "prairierunCalendarSync";
 const DAILY_CALENDAR_SYNC_KEY = "prairierunLastDailyCalendarSync";
 const CALENDAR_REPAIR_VERSION_KEY = "prairierunCalendarRepairVersion";
-const CALENDAR_REPAIR_VERSION = 1;
+const CALENDAR_REPAIR_VERSION = 2;
 const DAILY_CALENDAR_SYNC_ALARM = "prairierun-daily-calendar-sync";
 const DAILY_CALENDAR_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const DEBUG_LOG_KEY = "prairierunDebugLog";
@@ -53,6 +53,13 @@ async function getSettings() {
   return { ...defaultSettings, ...(stored[SETTINGS_KEY] || {}) };
 }
 
+function assignmentIdentity(assignment, existing) {
+  return {
+    assignmentAliases: [...new Set([assignment.id, ...(existing?.assignmentAliases || []), ...(assignment.assignmentAliases || [])])].sort(),
+    sourceUrls: [...new Set([existing?.sourceUrl, assignment.sourceUrl, ...(existing?.sourceUrls || []), ...(assignment.sourceUrls || [])].filter(Boolean))].sort(),
+  };
+}
+
 function normalizeStoredAssignment(assignment, existing, now, syncedCompletion) {
   const referenceCompletion = syncedCompletion || existing?.completionStatus;
   const completionChanged = Boolean(existing && assignment.completionStatus && referenceCompletion && referenceCompletion !== assignment.completionStatus);
@@ -64,9 +71,13 @@ function normalizeStoredAssignment(assignment, existing, now, syncedCompletion) 
   const dueAtLocal = manuallyEnteredDueAt || assignment.dueAtLocal || null;
   const sourceFingerprint = JSON.stringify({ title: assignment.title, dueAtLocal, timezone: assignment.timezone || null });
   const sourceChanged = Boolean(existing && existing.sourceFingerprint !== sourceFingerprint);
-  const changed = isNew || completionChanged || sourceChanged;
+  const identity = assignmentIdentity(assignment, existing);
+  const identityChanged = Boolean(existing && JSON.stringify(identity) !== JSON.stringify(assignmentIdentity(existing)));
+  const identityRepairPending = identityChanged || Boolean(existing?.identityRepairPending);
+  const changed = isNew || completionChanged || sourceChanged || identityRepairPending;
   return {
     ...existingClean, ...assignment, id: assignment.id, dueAtLocal, manuallyEnteredDueAt,
+    ...identity, identityRepairPending,
     score: assignment.score ?? existing?.score ?? null,
     completionStatus: assignment.completionStatus || existing?.completionStatus || "unknown",
     sourceFingerprint,
@@ -84,12 +95,9 @@ async function saveScanResult(assignments) {
   const merged = assignments.map((item) => {
     const existing = previous.get(item.id);
     const syncedCompletion = calendarSync[item.id]?.completionStatus;
-    const referenceCompletion = syncedCompletion || existing?.completionStatus;
-    const completionChanged = Boolean(existing && item.completionStatus && referenceCompletion && referenceCompletion !== item.completionStatus);
-    const incomingFingerprint = JSON.stringify({ title: item.title, dueAtLocal: existing?.manuallyEnteredDueAt || item.dueAtLocal || null, timezone: item.timezone || null });
-    const sourceChanged = Boolean(existing && existing.sourceFingerprint !== incomingFingerprint);
-    if (!existing || completionChanged || sourceChanged) detectedIds.add(item.id);
-    return normalizeStoredAssignment(item, existing, now, syncedCompletion);
+    const normalized = normalizeStoredAssignment(item, existing, now, syncedCompletion);
+    if (["new", "changed", "error"].includes(normalized.syncState)) detectedIds.add(item.id);
+    return normalized;
   });
   const scannedIds = new Set(merged.map((item) => item.id));
   const stale = (stored[ASSIGNMENTS_KEY] || []).filter((item) => !scannedIds.has(item.id)).map((item) => ({ ...item, syncState: "stale" }));
@@ -203,7 +211,7 @@ function applyExportResults(results, assignments) {
   results.forEach((result) => {
     const item = assignments.find((entry) => entry.id === result.assignment.id);
     if (!item) return;
-    if (["added", "updated"].includes(result.status)) { item.syncState = "synced"; item.errorMessage = null; }
+    if (["added", "updated"].includes(result.status)) { item.syncState = "synced"; item.errorMessage = null; item.identityRepairPending = false; }
     if (result.status === "failed") { item.syncState = "error"; item.errorMessage = result.reason; }
   });
 }
@@ -218,11 +226,18 @@ async function notifyHomeTab(tabId, assignments, detectedIds) {
   const lastDailySync = Number(stored[DAILY_CALENDAR_SYNC_KEY]) || 0;
   const repairDue = stored[CALENDAR_REPAIR_VERSION_KEY] !== CALENDAR_REPAIR_VERSION;
   const dailySyncDue = repairDue || !lastDailySync || Date.now() - lastDailySync >= DAILY_CALENDAR_SYNC_INTERVAL_MS;
-  const eligible = assignments.filter((item) => (dailySyncDue || detectedIds.has(item.id)) && item.dueAtLocal && item.syncState !== "stale" && (dailySyncDue || isCurrentAssignment(item)));
+  const eligible = assignments.filter((item) => (dailySyncDue || detectedIds.has(item.id)) && item.dueAtLocal && item.syncState !== "stale" && (dailySyncDue || item.identityRepairPending || isCurrentAssignment(item)));
   if (eligible.length) {
     debugLog(dailySyncDue ? "Running daily Calendar synchronization" : "Automatically synchronizing Calendar assignments", { count: eligible.length });
     try {
       const exportResults = await PrairieRunCalendar.exportAssignments(eligible);
+      debugLog("Calendar reconciliation results", exportResults.map((result) => ({
+        assignmentId: result.assignment.id,
+        sourceUrls: result.assignment.sourceUrls || [result.assignment.sourceUrl],
+        aliases: result.assignment.assignmentAliases || [],
+        status: result.status, removedDuplicates: result.removedDuplicates || 0,
+        ...(result.reason ? { reason: result.reason } : {}),
+      })));
       applyExportResults(exportResults, assignments);
       const updates = { [ASSIGNMENTS_KEY]: assignments };
       const failed = exportResults.filter((result) => result.status === "failed");
