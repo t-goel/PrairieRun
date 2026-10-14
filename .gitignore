@@ -1,3 +1,4 @@
 prairierun-stage-0-captures-*.json
 
 dist-firefox/
+.DS_Store

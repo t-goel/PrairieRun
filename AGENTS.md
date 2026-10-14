@@ -141,8 +141,8 @@ cleanup.
   future-agent context.
 - Also update `systemdesign.md` for architecture/dependency changes.
 - Also update `ux.md` for user-facing behavior changes.
-- Keep historical stage docs unless the user explicitly asks to archive or
-  remove them.
+- Historical stage planning documents were removed at the user's request.
+  Keep current setup documentation, systemdesign.md, ux.md, and test assets.
 
 ## Commit Discipline
 
