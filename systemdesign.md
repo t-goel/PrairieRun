@@ -9,6 +9,15 @@ marked by its current disposition. Future agent-facing project rules live in
 
 ## Current runtime architecture
 
+calendar.js serializes exports and removals through one write queue. New event
+IDs use a SHA-256 hash of the canonical assignment ID, so retried inserts reuse
+the same ID and recover an existing marked event on HTTP 409. Calendar creation
+without a stable ID is not blindly retried after uncertain network failures.
+Lookup includes hidden calendars and paginated exact-ID/verified-alias matches.
+After updating one retained event, sync deletes only the other confirmed
+PrairieRun-marked matches in that class calendar. Unmarked and unrelated events
+are preserved; matching titles alone never authorize cleanup.
+
 Assessment extraction groups base rows and numbered attempts into one record.
 Completed attempts take precedence over incomplete late attempts. Verified
 instance IDs are carried as assignmentAliases for Calendar event migration.

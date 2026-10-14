@@ -53,6 +53,11 @@ agent-facing project rules.
 
 ## Product promise
 
+Calendar sync repairs confirmed duplicate PrairieRun events automatically:
+one event retains the assignment's latest date, completion color, and reminders.
+Extra marked copies are removed only after that event is successfully updated.
+Personal events and assignments with merely similar titles are left alone.
+
 Multiple attempts at one assessment appear as one assignment. A completed
 attempt is not downgraded by a lower-scoring late attempt.
 

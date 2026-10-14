@@ -96,6 +96,11 @@ live dependency even though it is not loaded as a content script.
   replace its completed state or original due date for Calendar scheduling.
 - The parser emits one assignment per assessment group, prioritizes completed
   attempts, and retains verified assignmentAliases for legacy event migration.
+- All Calendar writes share the calendar.js queue. New event IDs are derived
+  from canonical assignment IDs; retries must reuse them and recover 409s.
+- Duplicate repair may delete only PrairieRun-marked events with the exact
+  assignment ID or verified parser aliases, after the retained event updates.
+  Never merge or delete events solely by title or due date.
 
 ## UI Rules
 
@@ -164,6 +169,7 @@ node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json', 'utf8'
 node stage0/test-adapter-core.js
 node stage0/test-capture-bundle.js
 node --test stage0/test-firefox-support.js
+node --test stage0/test-assignment-dedup.js stage0/test-calendar-dedup.js
 ```
 
 When UI or sync behavior changes, also ask the user to reload the unpacked
