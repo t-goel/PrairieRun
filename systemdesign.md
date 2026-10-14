@@ -9,6 +9,10 @@ marked by its current disposition. Future agent-facing project rules live in
 
 ## Current runtime architecture
 
+Assessment extraction groups base rows and numbered attempts into one record.
+Completed attempts take precedence over incomplete late attempts. Verified
+instance IDs are carried as assignmentAliases for Calendar event migration.
+
 ```text
 PrairieLearn page
   └─ content.js

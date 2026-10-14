@@ -53,6 +53,9 @@ agent-facing project rules.
 
 ## Product promise
 
+Multiple attempts at one assessment appear as one assignment. A completed
+attempt is not downgraded by a lower-scoring late attempt.
+
 “Scan my PrairieLearn classes, let me review everything in one place, and publish due dates to Google Calendar without duplicates.”
 
 The core interaction should be a short, reversible flow:

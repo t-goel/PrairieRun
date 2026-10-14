@@ -94,6 +94,8 @@ live dependency even though it is not loaded as a content script.
   of failing on the stale local calendar ID.
 - When an original assessment is completed, a later numbered extension must not
   replace its completed state or original due date for Calendar scheduling.
+- The parser emits one assignment per assessment group, prioritizes completed
+  attempts, and retains verified assignmentAliases for legacy event migration.
 
 ## UI Rules
 

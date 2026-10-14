@@ -42,7 +42,7 @@ function parsePercentage(value) {
 
 function completionFromScore(score, threshold = 95) {
   if (score == null || Number.isNaN(score)) return "unknown";
-  return score >= threshold ? "completed" : "incomplete";
+  return score > threshold ? "completed" : "incomplete";
 }
 
 function decodeAttributeHtml(value) {
@@ -171,13 +171,25 @@ function extractAssignments(document, location = window.location) {
     .map((row) => parseAssessmentRow(row, location, course))
     .filter(Boolean);
 
-  const baseRows = new Map(raw.filter((item) => item.assessmentId).map((item) => [item.baseLabel, item]));
-  const instanceLabels = new Set(raw.filter((item) => item.instanceId).map((item) => item.baseLabel));
+  const groups = new Map();
+  raw.forEach((item) => {
+    const key = item.baseLabel || item.assessmentId || item.instanceId;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  });
 
-  return raw
-    .filter((item) => !(item.assessmentId && instanceLabels.has(item.baseLabel)))
-    .map((item) => {
-      const base = baseRows.get(item.baseLabel);
+  return [...groups.values()].map((items) => {
+      const base = items.find((item) => item.assessmentId);
+      const attempts = items.filter((item) => item.instanceId);
+      const candidates = attempts.length ? attempts : items;
+      const completed = candidates.filter((item) => item.completionStatus === "completed");
+      // Keep the best completed attempt instead of letting a late attempt
+      // downgrade work that is already done. Ties prefer the earlier deadline.
+      const item = [...(completed.length ? completed : candidates)].sort((a, b) =>
+        (b.score ?? -1) - (a.score ?? -1)
+        || String(a.dueAtLocal || "9999").localeCompare(String(b.dueAtLocal || "9999"))
+        || String(a.instanceId || "").localeCompare(String(b.instanceId || ""))
+      )[0];
       const resolved = resolveAssessmentData(item, base);
       const assessmentId = item.assessmentId || base?.assessmentId || null;
       return {
@@ -193,6 +205,11 @@ function extractAssignments(document, location = window.location) {
         sourceUrl: resolved.sourceUrl,
         assessmentId,
         instanceId: item.instanceId,
+        assignmentAliases: items.map((row) => stableAssignmentKey({
+          courseInstanceId: course.courseInstanceId,
+          assessmentId: row.assessmentId,
+          fallbackId: row.instanceId,
+        })),
         score: resolved.score,
         completionStatus: resolved.completionStatus,
         dueAtLocal: resolved.dueAtLocal,

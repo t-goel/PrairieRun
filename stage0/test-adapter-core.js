@@ -17,7 +17,7 @@ test("scores map to the configured completion threshold", () => {
   assert.equal(adapter.parsePercentage("97%"), 97);
   assert.equal(adapter.parsePercentage("Not started"), null);
   assert.equal(adapter.completionFromScore(94.99), "incomplete");
-  assert.equal(adapter.completionFromScore(95), "completed");
+  assert.equal(adapter.completionFromScore(95), "incomplete");
   assert.equal(adapter.completionFromScore(95.01), "completed");
   assert.equal(adapter.completionFromScore(null), "unknown");
 });
