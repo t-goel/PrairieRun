@@ -8,9 +8,11 @@
 - Reconciles stored assignments with Google Calendar at least once every 24 hours, even when they have not changed.
 - Extracts assignments, course names, scores, source URLs, due timestamps, and time zones.
 - Merges base assessments and numbered assessment instances.
+- Prevents duplicate creation during overlapping syncs and network retries.
+- Repairs confirmed duplicate PrairieRun events on the first scan after this update; no data reset is needed.
 - Stores assignments locally in Chrome.
 - Shows an embedded assignment panel directly below the PrairieLearn course links, grouped by class.
-- Shows assignments due today or later; older assignments remain untouched in Google Calendar.
+- Shows assignments due today or later; full Calendar reconciliation also updates dated past assignments.
 - Shows the next three uncompleted assignments, with additional upcoming work and completed work in separate dropdowns.
 - Uses PrairieLearn completion status and the strict-greater-than-95% score rule.
 - Sorts incomplete assignments first and puts completed assignments in a dropdown.

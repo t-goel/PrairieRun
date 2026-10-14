@@ -62,6 +62,8 @@ Reloading this update and opening PrairieLearn triggers the initial duplicate
 repair automatically. There is no need to clear data or delete calendars.
 The popup reports failed assignments so a partial repair is not shown as a
 successful synchronization.
+The popup completion control says "Complete above" the threshold to make the
+strict comparison clear; exactly 95% is incomplete at the default threshold.
 
 Multiple attempts at one assessment appear as one assignment. A completed
 attempt is not downgraded by a lower-scoring late attempt.

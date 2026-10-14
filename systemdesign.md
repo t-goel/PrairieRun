@@ -126,10 +126,9 @@ as default and honors a `googleClientId` settings override for Firefox.
 
 ## Historical documentation
 
-`stage-0.md` through `stage-3.md` and portions of `ux.md` contain historical
-planning language for staging, selection, and manual export. They are not code
-dependencies. Consolidation or archival remains optional now that current
-behavior is represented in the system design and cleanup checklist.
+The obsolete stage planning documents were removed during repository cleanup.
+Historical portions of ux.md remain design history; current implementation
+notes take precedence over old staging, selection, and manual-export plans.
 
 ## Agent instructions
 

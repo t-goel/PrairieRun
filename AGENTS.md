@@ -166,14 +166,17 @@ cleanup.
 For extension changes, run checks proportional to the risk. Common baseline:
 
 ```bash
-node --check extension/*.js stage0/*.js capture-helper/*.js
+for file in extension/*.js stage0/*.js capture-helper/*.js; do node --check "$file" || exit 1; done
 node build-manifest.js --target=chrome --check
 node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json', 'utf8')); console.log('manifest ok')"
 node stage0/test-adapter-core.js
 node stage0/test-capture-bundle.js
 node --test stage0/test-firefox-support.js
-node --test stage0/test-assignment-dedup.js stage0/test-calendar-dedup.js
+node --test stage0/test-assignment-dedup.js stage0/test-calendar-dedup.js stage0/test-calendar-repair.js
 ```
+
+The capture-bundle check requires the private, gitignored capture JSON file;
+without that fixture, report the unavailable check rather than inventing data.
 
 When UI or sync behavior changes, also ask the user to reload the unpacked
 extension and verify in Chrome/Brave because this environment cannot fully
