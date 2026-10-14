@@ -58,6 +58,11 @@ one event retains the assignment's latest date, completion color, and reminders.
 Extra marked copies are removed only after that event is successfully updated.
 Personal events and assignments with merely similar titles are left alone.
 
+Reloading this update and opening PrairieLearn triggers the initial duplicate
+repair automatically. There is no need to clear data or delete calendars.
+The popup reports failed assignments so a partial repair is not shown as a
+successful synchronization.
+
 Multiple attempts at one assessment appear as one assignment. A completed
 attempt is not downgraded by a lower-scoring late attempt.
 

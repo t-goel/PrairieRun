@@ -9,6 +9,8 @@ const SYNC_KEY = "prairierunSyncStatus";
 const SETTINGS_KEY = "prairierunSettings";
 const BACKGROUND_CALENDAR_SYNC_KEY = "prairierunCalendarSync";
 const DAILY_CALENDAR_SYNC_KEY = "prairierunLastDailyCalendarSync";
+const CALENDAR_REPAIR_VERSION_KEY = "prairierunCalendarRepairVersion";
+const CALENDAR_REPAIR_VERSION = 1;
 const DAILY_CALENDAR_SYNC_ALARM = "prairierun-daily-calendar-sync";
 const DAILY_CALENDAR_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const DEBUG_LOG_KEY = "prairierunDebugLog";
@@ -212,9 +214,10 @@ async function sendHomeUpdate(tabId, assignments, exportResults = []) {
 
 async function notifyHomeTab(tabId, assignments, detectedIds) {
   await sendHomeUpdate(tabId, assignments);
-  const stored = await PrairieRunExt.storageLocalGet(DAILY_CALENDAR_SYNC_KEY);
+  const stored = await PrairieRunExt.storageLocalGet([DAILY_CALENDAR_SYNC_KEY, CALENDAR_REPAIR_VERSION_KEY]);
   const lastDailySync = Number(stored[DAILY_CALENDAR_SYNC_KEY]) || 0;
-  const dailySyncDue = !lastDailySync || Date.now() - lastDailySync >= DAILY_CALENDAR_SYNC_INTERVAL_MS;
+  const repairDue = stored[CALENDAR_REPAIR_VERSION_KEY] !== CALENDAR_REPAIR_VERSION;
+  const dailySyncDue = repairDue || !lastDailySync || Date.now() - lastDailySync >= DAILY_CALENDAR_SYNC_INTERVAL_MS;
   const eligible = assignments.filter((item) => (dailySyncDue || detectedIds.has(item.id)) && item.dueAtLocal && item.syncState !== "stale" && (dailySyncDue || isCurrentAssignment(item)));
   if (eligible.length) {
     debugLog(dailySyncDue ? "Running daily Calendar synchronization" : "Automatically synchronizing Calendar assignments", { count: eligible.length });
@@ -222,8 +225,13 @@ async function notifyHomeTab(tabId, assignments, detectedIds) {
       const exportResults = await PrairieRunCalendar.exportAssignments(eligible);
       applyExportResults(exportResults, assignments);
       const updates = { [ASSIGNMENTS_KEY]: assignments };
-      if (dailySyncDue) updates[DAILY_CALENDAR_SYNC_KEY] = Date.now();
+      const failed = exportResults.filter((result) => result.status === "failed");
+      if (dailySyncDue && !failed.length) {
+        updates[DAILY_CALENDAR_SYNC_KEY] = Date.now();
+        updates[CALENDAR_REPAIR_VERSION_KEY] = CALENDAR_REPAIR_VERSION;
+      }
       await PrairieRunExt.storageLocalSet(updates);
+      if (failed.length) await setSyncStatus({ state: "error", current: `${failed.length} Calendar assignment(s) could not sync: ${failed[0].reason}` });
       await sendHomeUpdate(tabId, assignments, exportResults);
     } catch (error) {
       debugLog("Automatic Calendar synchronization failed", { error: error.message });
@@ -308,7 +316,14 @@ async function resyncStoredAssignments() {
   applyExportResults(results, assignments);
   const current = stored[ASSIGNMENTS_KEY] || [];
   applyExportResults(results, current);
-  await PrairieRunExt.storageLocalSet({ [ASSIGNMENTS_KEY]: current, [DAILY_CALENDAR_SYNC_KEY]: Date.now() });
+  const failed = results.filter((result) => result.status === "failed");
+  const updates = { [ASSIGNMENTS_KEY]: current };
+  if (!failed.length) {
+    updates[DAILY_CALENDAR_SYNC_KEY] = Date.now();
+    updates[CALENDAR_REPAIR_VERSION_KEY] = CALENDAR_REPAIR_VERSION;
+  }
+  await PrairieRunExt.storageLocalSet(updates);
+  if (failed.length) await setSyncStatus({ state: "error", current: `${failed.length} Calendar assignment(s) could not sync: ${failed[0].reason}` });
   const tabs = await PrairieRunExt.tabsQuery({ url: "https://us.prairielearn.com/*" });
   await Promise.all(tabs.filter((tab) => tab.id).map((tab) => sendHomeUpdate(tab.id, current, results)));
 }

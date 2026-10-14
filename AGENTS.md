@@ -101,6 +101,9 @@ live dependency even though it is not loaded as a content script.
 - Duplicate repair may delete only PrairieRun-marked events with the exact
   assignment ID or verified parser aliases, after the retained event updates.
   Never merge or delete events solely by title or due date.
+- The repair-version marker forces a full reconciliation on the next scan
+  after upgrading. Advance it and the daily-success timestamp only when all
+  exported assignments succeed; expose partial failures in the popup status.
 
 ## UI Rules
 

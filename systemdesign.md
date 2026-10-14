@@ -18,6 +18,11 @@ After updating one retained event, sync deletes only the other confirmed
 PrairieRun-marked matches in that class calendar. Unmarked and unrelated events
 are preserved; matching titles alone never authorize cleanup.
 
+A stored repair-version marker forces full reconciliation of dated assignments
+on the first scan after this upgrade, including past-due work. The marker and
+daily sync timestamp advance only when every exported assignment succeeds.
+Partial failures appear in the popup and leave repair due on the next scan.
+
 Assessment extraction groups base rows and numbered attempts into one record.
 Completed attempts take precedence over incomplete late attempts. Verified
 instance IDs are carried as assignmentAliases for Calendar event migration.
