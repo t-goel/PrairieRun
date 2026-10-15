@@ -59,3 +59,50 @@ test('upgrade repairs unchanged past-due assignments, retries failures, then sto
   assert.ok(next.merged[0].sourceUrls.some((url) => url.includes('/assessment_instance/3/')));
   assert.equal(next.detectedIds.size, 0);
 });
+
+test('instance-only scans recover parent identity from history or a confirmed same-course link', async () => {
+  const instance = { id: 'pl:229304:instance:15272849', courseInstanceId: '229304',
+    assessmentId: null, instanceId: '15272849', label: 'GA:9',
+    title: 'Group Activity 9: B+ Trees Automated', score: 100, completionStatus: 'completed',
+    sourceUrl: 'https://us.prairielearn.com/pl/course_instance/229304/assessment_instance/15272849/',
+    assignmentAliases: ['pl:229304:instance:15272849'],
+  };
+  const original = { ...instance, id: 'pl:229304:assessment:2724826',
+    assessmentId: '2724826', instanceId: null, completionStatus: 'unknown', score: null,
+  };
+  const local = {};
+  const context = { URL, console: { log: () => {} }, input: [instance], history: [original], links: {},
+    PrairieRunCalendar: {}, PrairieRunExt: {
+      storageLocalSet: async (value) => Object.assign(local, value),
+      storageLocalGet: async () => structuredClone(local),
+      addRuntimeMessageListener: () => {}, addStorageChangedListener: () => {},
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../extension/background.js'), 'utf8'), context);
+  const run = () => vm.runInContext('resolveHistoricalIdentities(input, history, links)', context);
+  let result = run()[0];
+  assert.equal(result.id, original.id);
+  assert.equal(result.completionStatus, 'completed');
+  assert.equal(result.score, 100);
+  assert.ok(result.assignmentAliases.includes(instance.id));
+  assert.ok(result.sourceUrls.includes('https://us.prairielearn.com/pl/course_instance/229304/assessment/2724826/'));
+  context.history = [];
+  assert.equal(run()[0].id, instance.id); // No title-only guessing.
+  context.links = { [instance.id]: original.id };
+  assert.equal(run()[0].id, original.id);
+  // A configured link must cause identity repair even when already synced.
+  local.prairierunAssignments = [{ ...instance, syncState: 'synced' }];
+  local.prairierunAssignmentLinks = context.links;
+  const scan = await vm.runInContext('saveScanResult(input)', context);
+  assert.equal(scan.merged[0].id, original.id);
+  assert.equal(scan.merged[0].identityRepairPending, true);
+  assert.ok(scan.detectedIds.has(original.id));
+  context.links = { [instance.id]: 'pl:999999:assessment:2724826' };
+  assert.equal(run()[0].id, instance.id); // Cross-course links rejected.
+  context.links = {};
+  context.history = [original, { ...original, assessmentId: '999999' }];
+  assert.equal(run()[0].id, instance.id); // Ambiguous history rejected.
+  context.history = [{ ...original, label: 'GA:10' }];
+  assert.equal(run()[0].id, instance.id); // Same title alone isn't evidence.
+});

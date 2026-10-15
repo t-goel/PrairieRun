@@ -11,6 +11,7 @@ const BACKGROUND_CALENDAR_SYNC_KEY = "prairierunCalendarSync";
 const DAILY_CALENDAR_SYNC_KEY = "prairierunLastDailyCalendarSync";
 const CALENDAR_REPAIR_VERSION_KEY = "prairierunCalendarRepairVersion";
 const CALENDAR_REPAIR_VERSION = 2;
+const ASSIGNMENT_LINKS_KEY = "prairierunAssignmentLinks";
 const DAILY_CALENDAR_SYNC_ALARM = "prairierun-daily-calendar-sync";
 const DAILY_CALENDAR_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const DEBUG_LOG_KEY = "prairierunDebugLog";
@@ -87,13 +88,14 @@ function normalizeStoredAssignment(assignment, existing, now, syncedCompletion) 
 }
 
 async function saveScanResult(assignments) {
-  const stored = await PrairieRunExt.storageLocalGet([ASSIGNMENTS_KEY, BACKGROUND_CALENDAR_SYNC_KEY]);
+  const stored = await PrairieRunExt.storageLocalGet([ASSIGNMENTS_KEY, BACKGROUND_CALENDAR_SYNC_KEY, ASSIGNMENT_LINKS_KEY]);
   const previous = new Map((stored[ASSIGNMENTS_KEY] || []).map((item) => [item.id, item]));
+  const resolvedAssignments = resolveHistoricalIdentities(assignments, stored[ASSIGNMENTS_KEY] || [], stored[ASSIGNMENT_LINKS_KEY] || {});
   const calendarSync = stored[BACKGROUND_CALENDAR_SYNC_KEY] || {};
   const now = new Date().toISOString();
   const detectedIds = new Set();
-  const merged = assignments.map((item) => {
-    const existing = previous.get(item.id);
+  const merged = resolvedAssignments.map((item) => {
+    const existing = previous.get(item.id) || (item.assignmentAliases || []).map((id) => previous.get(id)).find(Boolean);
     const syncedCompletion = calendarSync[item.id]?.completionStatus;
     const normalized = normalizeStoredAssignment(item, existing, now, syncedCompletion);
     if (["new", "changed", "error"].includes(normalized.syncState)) detectedIds.add(item.id);
@@ -103,6 +105,39 @@ async function saveScanResult(assignments) {
   const stale = (stored[ASSIGNMENTS_KEY] || []).filter((item) => !scannedIds.has(item.id)).map((item) => ({ ...item, syncState: "stale" }));
   await PrairieRunExt.storageLocalSet({ [ASSIGNMENTS_KEY]: [...merged, ...stale] });
   return { merged, detectedIds };
+}
+
+function resolveHistoricalIdentities(assignments, history, confirmedLinks) {
+  return assignments.map((item) => {
+    if (item.assessmentId || !item.instanceId) return item;
+    const course = String(item.courseInstanceId);
+    const originalId = item.id;
+    const configured = confirmedLinks[originalId];
+    const configuredMatch = typeof configured === "string" && configured.match(/^pl:(\d+):assessment:(\d+)$/);
+    const candidates = history.filter((old) => old.assessmentId
+      && String(old.courseInstanceId) === course && item.label && old.label === item.label
+      && item.title && old.title === item.title);
+    const ids = [...new Set(candidates.map((old) => String(old.assessmentId)))];
+    const assessmentId = configuredMatch && configuredMatch[1] === course
+      ? configuredMatch[2] : ids.length === 1 ? ids[0] : null;
+    if (!assessmentId) return item;
+    const canonicalId = `pl:${course}:assessment:${assessmentId}`;
+    // A currently visible, separately grouped assessment makes this ambiguous.
+    if (assignments.some((other) => other !== item && other.id === canonicalId)) return item;
+    let source;
+    try {
+      const url = new URL(item.sourceUrl);
+      if (url.pathname !== `/pl/course_instance/${course}/assessment_instance/${item.instanceId}/`
+        && url.pathname !== `/pl/course_instance/${course}/assessment_instance/${item.instanceId}`) return item;
+      source = `${url.origin}/pl/course_instance/${course}/assessment/${assessmentId}/`;
+    } catch { return item; }
+    debugLog("Recovered parent assessment identity", { instanceId: item.instanceId, assessmentId,
+      evidence: configuredMatch && configuredMatch[1] === course ? "user-confirmed link" : "historical course, label and title" });
+    return { ...item, id: canonicalId, assessmentId,
+      assignmentAliases: [...new Set([originalId, canonicalId, ...(item.assignmentAliases || [])])],
+      sourceUrls: [...new Set([source, item.sourceUrl, ...(item.sourceUrls || [])])],
+    };
+  });
 }
 
 async function setSyncStatus(status) { await PrairieRunExt.storageLocalSet({ [SYNC_KEY]: status }); }

@@ -32,6 +32,15 @@ completed the first repair. Verified source URLs and aliases persist across
 scans of the same canonical ID; newly found identities trigger repair even for
 past-due work and clear their pending flag only after a successful update.
 
+The current course page may replace an unstarted assessment link with only an
+instance link. Before merging scan results, background.js resolves a unique
+historical parent using the course ID, assessment label, and exact title.
+With no history, prairierunAssignmentLinks accepts explicit user-confirmed
+instance-to-assessment IDs, validated within one course. Recovered records use
+the canonical assessment ID, retain the instance alias, and become pending
+repair. Fetching assessment definitions to follow redirects is avoided because
+PrairieLearn's GET handler can create homework attempts.
+
 Assessment extraction groups base rows and numbered attempts into one record.
 Completed attempts take precedence over incomplete late attempts. Verified
 instance IDs are carried as assignmentAliases for Calendar event migration.

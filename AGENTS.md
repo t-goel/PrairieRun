@@ -108,6 +108,12 @@ live dependency even though it is not loaded as a content script.
 - Preserve verified source links and aliases across scans of the same canonical
   ID. Newly discovered identities schedule repair even for past-due work, and
   remain pending until the Calendar update succeeds. Repair version is now 2.
+- Instance-only scans can recover a parent assessment from a unique historical
+  record with the same course, label, and exact title. Ambiguous matches and
+  title-only matches are rejected. After history is cleared, users may supply
+  explicit instance-to-assessment IDs via prairierunAssignmentLinks local
+  storage; validate same-course IDs. Never probe assessment URLs automatically:
+  a GET to an unstarted homework can create an attempt in PrairieLearn.
 - The repair-version marker forces a full reconciliation on the next scan
   after upgrading. Advance it and the daily-success timestamp only when all
   exported assignments succeed; expose partial failures in the popup status.
