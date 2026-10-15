@@ -3,6 +3,7 @@ const CALENDAR_MAPPINGS_KEY = "prairierunCalendarMappings";
 const CALENDAR_SYNC_KEY = "prairierunCalendarSync";
 const CALENDAR_TOKEN_KEY = "prairierunCalendarToken";
 const CALENDAR_COLOR_KEY = "prairierunCalendarColors";
+const CALENDAR_GENERATIONS_KEY = "prairierunCalendarEventGenerations";
 const CALENDAR_API = "https://www.googleapis.com/calendar/v3";
 let writeQueue = Promise.resolve();
 
@@ -12,8 +13,9 @@ function queueWrite(operation) {
   return pending;
 }
 
-async function stableEventId(assignmentId) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(assignmentId));
+async function stableEventId(assignmentId, generation = 0) {
+  const value = generation ? `${assignmentId}:generation:${generation}` : assignmentId;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return "prr" + [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 // Chrome/Brave OAuth client (Chrome-app type). Firefox must use a separate
@@ -180,7 +182,7 @@ async function listMarkedEvents(calendarId, token) {
       const result = await calendarRequest(`/calendars/${encodeURIComponent(calendarId)}/events?${params}`, {}, token);
       for (const event of result.items || []) {
         const marker = event.extendedProperties?.private;
-        if (event.id && marker?.prairieRun === "1") matches.set(event.id, event);
+        if (event.id && event.status !== "cancelled" && marker?.prairieRun === "1") matches.set(event.id, event);
       }
       pageToken = result.nextPageToken;
     } while (pageToken);
@@ -245,13 +247,69 @@ async function findParentCandidates(assignments) {
   return [...candidates.values()];
 }
 
+async function insertOrRecoverEvent(assignment, calendarId, resource, token, generations) {
+  const generationKey = `${calendarId}|${assignment.id}`;
+  let generation = generations[generationKey] || 0;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const eventId = await stableEventId(assignment.id, generation);
+    const path = `/calendars/${encodeURIComponent(calendarId)}/events`;
+    try {
+      const event = await calendarRequest(path, { method: "POST", body: JSON.stringify({ ...resource, id: eventId }) }, token);
+      return { event, status: "added" };
+    } catch (error) {
+      if (error.status !== 409) throw error;
+      let event;
+      try { event = await calendarRequest(`${path}/${eventId}`, {}, token); }
+      catch (lookupError) {
+        if (lookupError.status !== 410) throw lookupError;
+      }
+      if (!event || event.status === "cancelled") {
+        // A deleted ID may remain reserved by Google. Persist the next
+        // generation before insertion so retries and reloads reuse that ID.
+        generations[generationKey] = ++generation;
+        await PrairieRunExt.storageLocalSet({ [CALENDAR_GENERATIONS_KEY]: generations });
+        continue;
+      }
+      const keys = new Set([assignment.id, ...(assignment.assignmentAliases || [])]);
+      if (event.extendedProperties?.private?.prairieRun !== "1" || !keys.has(event.extendedProperties?.private?.assignmentId)) throw new Error("Existing event ID does not belong to this PrairieRun assignment.");
+      await calendarRequest(`${path}/${eventId}`, { method: "PATCH", body: JSON.stringify(resource) }, token);
+      return { event, status: "updated" };
+    }
+  }
+  throw new Error("Could not restore the Calendar event after multiple deleted IDs; refresh to retry.");
+}
+
+async function inspectAssignmentEvents(assignments) {
+  const dated = assignments.filter((item) => item.dueAtLocal && item.syncState !== "stale");
+  if (!dated.length) return { missingIds: [], duplicateIds: [] };
+  const token = await getCalendarToken();
+  const calendars = await listWritableCalendars(token);
+  const stored = await PrairieRunExt.storageLocalGet(CALENDAR_MAPPINGS_KEY);
+  const mappings = stored[CALENDAR_MAPPINGS_KEY] || {};
+  const cache = new Map();
+  const missingIds = [];
+  const duplicateIds = [];
+  for (const item of dated) {
+    const courseKey = item.courseInstanceId || item.courseName;
+    const calendar = calendars.find((entry) => entry.id === mappings[courseKey])
+      || calendars.find((entry) => entry.summary === `PrairieLearn — ${item.courseName || "Class"}`);
+    if (!calendar) { missingIds.push(item.id); continue; }
+    if (!cache.has(calendar.id)) cache.set(calendar.id, await listMarkedEvents(calendar.id, token));
+    const matches = await findMarkedEvents(item, calendar.id, token, cache.get(calendar.id));
+    if (!matches.length) missingIds.push(item.id);
+    if (matches.length > 1) duplicateIds.push(item.id);
+  }
+  return { missingIds, duplicateIds };
+}
+
 async function exportAssignmentsNow(assignments) {
   if (!assignments.length) throw new Error("No assignments with due dates are ready to sync.");
   const token = await getCalendarToken();
   const calendars = await listWritableCalendars(token);
-  const stored = await PrairieRunExt.storageLocalGet([CALENDAR_MAPPINGS_KEY, CALENDAR_SYNC_KEY, "prairierunSettings"]);
+  const stored = await PrairieRunExt.storageLocalGet([CALENDAR_MAPPINGS_KEY, CALENDAR_SYNC_KEY, CALENDAR_GENERATIONS_KEY, "prairierunSettings"]);
   const mappings = stored[CALENDAR_MAPPINGS_KEY] || {};
   const sync = stored[CALENDAR_SYNC_KEY] || {};
+  const generations = stored[CALENDAR_GENERATIONS_KEY] || {};
   const reminderMinutes = Math.max(0, Math.min(10080, Number(stored.prairierunSettings?.notificationLeadMinutes) || 240));
   const results = [];
   const eventCache = new Map();
@@ -271,7 +329,7 @@ async function exportAssignmentsNow(assignments) {
       if (!eventCache.has(calendar.id)) eventCache.set(calendar.id, await listMarkedEvents(calendar.id, token));
       const calendarEvents = eventCache.get(calendar.id);
       const matches = await findMarkedEvents(assignment, calendar.id, token, calendarEvents);
-      const generatedId = await stableEventId(assignment.id);
+      const generatedId = await stableEventId(assignment.id, generations[`${calendar.id}|${assignment.id}`] || 0);
       const preferredId = sync[assignment.id]?.googleEventId;
       let event = matches.find((item) => item.id === preferredId)
         || matches.find((item) => item.id === generatedId)
@@ -285,18 +343,9 @@ async function exportAssignmentsNow(assignments) {
       let status;
       if (event?.id) { await calendarRequest(`/calendars/${encodeURIComponent(calendar.id)}/events/${encodeURIComponent(event.id)}`, { method: "PATCH", body: JSON.stringify(resource) }, token); status = "updated"; }
       else {
-        try {
-          event = await calendarRequest(`/calendars/${encodeURIComponent(calendar.id)}/events`, { method: "POST", body: JSON.stringify({ ...resource, id: generatedId }) }, token);
-          status = "added";
-        } catch (error) {
-          if (error.status !== 409) throw error;
-          // A previous insert may have succeeded even if its response was lost.
-          event = await calendarRequest(`/calendars/${encodeURIComponent(calendar.id)}/events/${generatedId}`, {}, token);
-          const keys = new Set([assignment.id, ...(assignment.assignmentAliases || [])]);
-          if (event.extendedProperties?.private?.prairieRun !== "1" || !keys.has(event.extendedProperties?.private?.assignmentId)) throw new Error("Existing event ID does not belong to this PrairieRun assignment.");
-          await calendarRequest(`/calendars/${encodeURIComponent(calendar.id)}/events/${generatedId}`, { method: "PATCH", body: JSON.stringify(resource) }, token);
-          status = "updated";
-        }
+        const recovered = await insertOrRecoverEvent(assignment, calendar.id, resource, token, generations);
+        event = recovered.event;
+        status = recovered.status;
       }
       let removedDuplicates = 0;
       for (const duplicate of matches.filter((item) => item.id !== event.id)) {
@@ -338,5 +387,6 @@ async function removeAssignmentEventNow(assignment) {
 
 globalThis.PrairieRunCalendar = { exportAssignments, removeAssignmentEvent,
   findParentCandidates: (assignments) => queueWrite(() => findParentCandidates(structuredClone(assignments))),
+  inspectAssignmentEvents: (assignments) => queueWrite(() => inspectAssignmentEvents(structuredClone(assignments))),
 };
 })();

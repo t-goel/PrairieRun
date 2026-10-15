@@ -53,6 +53,10 @@ agent-facing project rules.
 
 ## Product promise
 
+When an eligible assignment event is recreated after manual deletion, it uses
+the current completion color and reminders. Deleted Google event IDs are
+handled explicitly so restoration does not silently fail on an ID conflict.
+
 Calendar sync repairs confirmed duplicate PrairieRun events automatically:
 one event retains the assignment's latest date, completion color, and reminders.
 Extra marked copies are removed only after that event is successfully updated.

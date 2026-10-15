@@ -9,6 +9,13 @@ marked by its current disposition. Future agent-facing project rules live in
 
 ## Current runtime architecture
 
+Deleted stable event IDs can remain reserved by Google. Insertion recovers a
+409 by reading that ID: a confirmed cancelled event or HTTP 410 advances a
+persisted, deterministic generation for that assignment/calendar. Persisting
+before POST makes retries reuse the replacement ID. Active unrelated events
+and ambiguous 404s do not permit ID rotation. inspectAssignmentEvents performs
+a read-only, paginated check for missing or duplicate marked events.
+
 identity-resolver.js verifies parent/attempt relationships using an unused
 assessment subpath: PrairieLearn's studentAssessmentRedirect middleware can
 redirect to an existing attempt, while the unused path never executes the

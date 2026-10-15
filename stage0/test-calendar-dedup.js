@@ -18,7 +18,8 @@ function harness({ initial = [], loseInsert = false, failPatch = false, failCrea
   const events = structuredClone(initial);
   const local = { prairierunCalendarMappings: { '1': 'class' } };
   const calls = [];
-  let lost = false;
+  const tombstones = new Map();
+  const faults = { loseInsert };
   const context = {
     URL, URLSearchParams, TextEncoder, structuredClone, crypto: webcrypto,
     setTimeout: (fn) => { fn(); },
@@ -44,14 +45,14 @@ function harness({ initial = [], loseInsert = false, failPatch = false, failCrea
       }
       if (route.pathname.endsWith('/events') && options.method === 'POST') {
         const resource = JSON.parse(options.body);
-        if (events.some((event) => event.id === resource.id)) return reply({ error: 'duplicate' }, 409);
+        if (events.some((event) => event.id === resource.id) || tombstones.has(resource.id)) return reply({ error: 'duplicate' }, 409);
         events.push(resource);
-        if (loseInsert && !lost) { lost = true; throw new Error('Response lost after event was stored'); }
+        if (faults.loseInsert) { faults.loseInsert = false; throw new Error('Response lost after event was stored'); }
         return reply(resource);
       }
       if (route.pathname.endsWith('/events')) {
         const filter = route.searchParams.getAll('privateExtendedProperty').find((value) => value.startsWith('assignmentId='));
-        const matching = events.filter((event) => event.extendedProperties?.private?.prairieRun === '1'
+        const matching = events.filter((event) => event.status !== 'cancelled' && event.extendedProperties?.private?.prairieRun === '1'
           && (!filter || event.extendedProperties.private.assignmentId === filter.slice(13)));
         // Each page returns one result to exercise duplicate lookup pagination.
         const index = Number(route.searchParams.get('pageToken') || 0);
@@ -59,19 +60,22 @@ function harness({ initial = [], loseInsert = false, failPatch = false, failCrea
           ...(index + 1 < matching.length ? { nextPageToken: String(index + 1) } : {}) });
       }
       const id = route.pathname.split('/').pop();
+      if (tombstones.has(id)) return reply(tombstones.get(id), tombstones.get(id).httpStatus || 200);
       const index = events.findIndex((event) => event.id === id);
       if (index === -1) return reply({}, 404);
       if (options.method === 'PATCH') {
         if (failPatch) return reply({ error: 'forbidden' }, 403);
         Object.assign(events[index], JSON.parse(options.body));
       }
-      if (options.method === 'DELETE') { events.splice(index, 1); return reply(null, 204); }
+      if (options.method === 'DELETE') {
+        tombstones.set(id, { id, status: 'cancelled' }); events.splice(index, 1); return reply(null, 204);
+      }
       return reply(events[index]);
     },
   };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../extension/calendar.js'), 'utf8'), context);
-  return { api: context.PrairieRunCalendar, events, calls, local };
+  return { api: context.PrairieRunCalendar, events, calls, local, tombstones, faults };
 }
 
 test('overlapping exports create one event and apply the last completion update', async () => {
@@ -163,4 +167,54 @@ test('legacy marked events supply automatic candidates, but title alone does not
   assert.equal(h.calls.filter((call) => ['POST', 'PATCH', 'DELETE'].includes(call.method)).length, 0);
   assert.equal(h.events.length, 1);
   assert.equal(JSON.stringify(await h.api.findParentCandidates([{ ...item, title: 'Different homework' }])), '[]');
+});
+
+test('deleted stable IDs are recreated once, including lost responses and cleared generation storage', async () => {
+  const h = harness();
+  await h.api.exportAssignments([assignment]);
+  const firstId = h.events[0].id;
+  h.events.splice(0, 1);
+  h.tombstones.set(firstId, { id: firstId, status: 'cancelled' });
+  h.faults.loseInsert = true;
+  const results = await Promise.all([h.api.exportAssignments([assignment]), h.api.exportAssignments([assignment])]);
+  assert.ok(results.every((result) => result[0].status !== 'failed'));
+  assert.equal(h.events.length, 1);
+  assert.notEqual(h.events[0].id, firstId);
+  assert.equal(h.events[0].colorId, '8');
+  assert.equal(h.local.prairierunCalendarEventGenerations['class|' + assignment.id], 1);
+  const secondId = h.events[0].id;
+  h.events.splice(0, 1);
+  h.tombstones.set(secondId, { id: secondId, httpStatus: 410 });
+  delete h.local.prairierunCalendarEventGenerations;
+  const restored = await h.api.exportAssignments([assignment]);
+  assert.equal(restored[0].status, 'added');
+  assert.equal(h.events.length, 1);
+  assert.notEqual(h.events[0].id, secondId);
+  assert.equal(h.local.prairierunCalendarEventGenerations['class|' + assignment.id], 2);
+});
+
+test('uncertain or unrelated ID conflicts do not generate additional event IDs', async () => {
+  const h = harness();
+  await h.api.exportAssignments([assignment]);
+  const id = h.events[0].id;
+  h.events.splice(0, 1);
+  h.tombstones.set(id, { id, httpStatus: 404 });
+  const uncertain = await h.api.exportAssignments([assignment]);
+  assert.equal(uncertain[0].status, 'failed');
+  assert.equal(h.local.prairierunCalendarEventGenerations, undefined);
+  h.tombstones.set(id, marked(id, 'unrelated'));
+  const unrelated = await h.api.exportAssignments([assignment]);
+  assert.equal(unrelated[0].status, 'failed');
+  assert.equal(h.events.length, 0);
+});
+
+test('read-only inspection detects missing and duplicate events even for already synced assignments', async () => {
+  const h = harness({ initial: [marked('a'), marked('b')] });
+  let inspected = await h.api.inspectAssignmentEvents([{ ...assignment, syncState: 'synced' }]);
+  assert.deepEqual([...inspected.duplicateIds], [assignment.id]);
+  assert.equal(inspected.missingIds.length, 0);
+  h.events.splice(0, h.events.length);
+  inspected = await h.api.inspectAssignmentEvents([{ ...assignment, syncState: 'synced' }]);
+  assert.deepEqual([...inspected.missingIds], [assignment.id]);
+  assert.equal(h.calls.filter((call) => ['POST', 'PATCH', 'DELETE'].includes(call.method)).length, 0);
 });

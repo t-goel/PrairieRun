@@ -98,6 +98,11 @@ live dependency even though it is not loaded as a content script.
   attempts, and retains verified assignmentAliases for legacy event migration.
 - All Calendar writes share the calendar.js queue. New event IDs are derived
   from canonical assignment IDs; retries must reuse them and recover 409s.
+- Google may retain deleted event IDs. On a confirmed cancelled event or HTTP
+  410 from the conflicted ID, advance a deterministic per-calendar/assignment
+  generation, persisted in prairierunCalendarEventGenerations before insertion.
+  Network uncertainty, HTTP 404, or unrelated active conflicts must not rotate
+  IDs. inspectAssignmentEvents is read-only and reports missing/duplicate IDs.
 - Duplicate repair may delete only PrairieRun-marked events with the exact
   assignment ID or verified parser aliases, after the retained event updates.
   Never merge or delete events solely by title or due date.
