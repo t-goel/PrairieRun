@@ -81,6 +81,10 @@ live dependency even though it is not loaded as a content script.
   for sync.
 - Calendar events should be one-hour blocks ending at the assignment due date.
 - Only sync new assignments or materially changed assignments.
+- Every successful page scan also checks marked Calendar events for missing
+  copies or duplicates. Those are repair work even when assignment data is
+  unchanged or past due. Healthy unchanged events get no writes; inspection
+  errors must report failure without blindly creating replacements.
 - A score increase below the completion threshold is not a material calendar
   change by itself.
 - Completion means score is strictly greater than 95 percent. Exactly 95 percent

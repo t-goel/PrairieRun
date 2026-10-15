@@ -276,7 +276,22 @@ async function notifyHomeTab(tabId, assignments, detectedIds) {
   const lastDailySync = Number(stored[DAILY_CALENDAR_SYNC_KEY]) || 0;
   const repairDue = stored[CALENDAR_REPAIR_VERSION_KEY] !== CALENDAR_REPAIR_VERSION;
   const dailySyncDue = repairDue || !lastDailySync || Date.now() - lastDailySync >= DAILY_CALENDAR_SYNC_INTERVAL_MS;
-  const eligible = assignments.filter((item) => (dailySyncDue || detectedIds.has(item.id)) && item.dueAtLocal && item.syncState !== "stale" && (dailySyncDue || item.identityRepairPending || isCurrentAssignment(item)));
+  const eventRepairIds = new Set();
+  const missingIds = new Set();
+  if (!dailySyncDue && assignments.some((item) => item.dueAtLocal && item.syncState !== "stale")) {
+    await setSyncStatus({ state: "syncing", current: "Checking Google Calendar events…", found: assignments.length });
+    try {
+      const inspection = await PrairieRunCalendar.inspectAssignmentEvents(assignments);
+      for (const id of inspection.missingIds) { eventRepairIds.add(id); missingIds.add(id); }
+      for (const id of inspection.duplicateIds) eventRepairIds.add(id);
+      debugLog("Calendar event presence checked", { missing: inspection.missingIds.length, duplicates: inspection.duplicateIds.length });
+    } catch (error) {
+      await setSyncStatus({ state: "error", current: `Could not check Google Calendar: ${error.message}` });
+      debugLog("Calendar event presence check failed", { error: error.message });
+      return;
+    }
+  }
+  const eligible = assignments.filter((item) => (dailySyncDue || detectedIds.has(item.id) || eventRepairIds.has(item.id)) && item.dueAtLocal && item.syncState !== "stale" && (dailySyncDue || item.identityRepairPending || eventRepairIds.has(item.id) || isCurrentAssignment(item)));
   if (eligible.length) {
     debugLog(dailySyncDue ? "Running daily Calendar synchronization" : "Automatically synchronizing Calendar assignments", { count: eligible.length });
     await setSyncStatus({ state: "syncing", current: "Synchronizing Google Calendar…", found: assignments.length });
@@ -300,9 +315,12 @@ async function notifyHomeTab(tabId, assignments, detectedIds) {
       if (failed.length) await setSyncStatus({ state: "error", current: `${failed.length} Calendar assignment(s) could not sync: ${failed[0].reason}` });
       else {
         const removed = exportResults.reduce((total, result) => total + (result.removedDuplicates || 0), 0);
-        await setSyncStatus({ state: "complete", current: removed
-          ? `Calendar synced. Removed ${removed} duplicate event(s).` : "Google Calendar synced.",
-          found: assignments.length, removedDuplicates: removed });
+        const restored = exportResults.filter((result) => missingIds.has(result.assignment.id) && ["added", "updated"].includes(result.status)).length;
+        const messages = ["Google Calendar synced."];
+        if (restored) messages.push(`Restored ${restored} missing event(s).`);
+        if (removed) messages.push(`Removed ${removed} duplicate event(s).`);
+        await setSyncStatus({ state: "complete", current: messages.join(" "),
+          found: assignments.length, removedDuplicates: removed, restoredEvents: restored });
       }
       await sendHomeUpdate(tabId, assignments, exportResults);
     } catch (error) {
@@ -310,7 +328,8 @@ async function notifyHomeTab(tabId, assignments, detectedIds) {
       await setSyncStatus({ state: "error", current: error.message });
       await sendHomeUpdate(tabId, assignments);
     }
-  }
+  } else await setSyncStatus({ state: "complete", current: assignments.some((item) => item.dueAtLocal && item.syncState !== "stale")
+    ? "Google Calendar checked. No changes needed." : "No dated assignments to sync.", found: assignments.length });
 }
 
 async function scanOnce(sourceTabId) {

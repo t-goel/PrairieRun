@@ -15,6 +15,11 @@ persisted, deterministic generation for that assignment/calendar. Persisting
 before POST makes retries reuse the replacement ID. Active unrelated events
 and ambiguous 404s do not permit ID rotation. inspectAssignmentEvents performs
 a read-only, paginated check for missing or duplicate marked events.
+On ordinary scans, background.js runs this inspection before deciding there
+are no Calendar changes. Missing events/calendars and duplicate matches enter
+the repair set immediately, including past-due assignments, without waiting
+for the 24-hour full reconciliation. Inspection failure stops that sync with
+an error; healthy unchanged events receive no API writes.
 
 identity-resolver.js verifies parent/attempt relationships using an unused
 assessment subpath: PrairieLearn's studentAssessmentRedirect middleware can

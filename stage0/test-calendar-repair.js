@@ -12,7 +12,7 @@ test('upgrade repairs unchanged past-due assignments, retries failures, then sto
   const input = [{ id: 'pl:1:assessment:2', dueAtLocal: '2020-01-01 11:00:00', syncState: 'synced' }];
   const context = {
     console: { log: () => {} }, input,
-    PrairieRunCalendar: { exportAssignments: async (items) => {
+    PrairieRunCalendar: { inspectAssignmentEvents: async () => ({ missingIds: [], duplicateIds: [] }), exportAssignments: async (items) => {
       calls.push(items.map((item) => item.id));
       return items.map((assignment) => ({ assignment,
         status: fail ? 'failed' : 'updated', reason: fail ? 'Network failed' : undefined }));
@@ -147,4 +147,53 @@ test('a clean scan learns, saves and reuses server-verified parent links without
   await vm.runInContext('saveScanResult(input, 1)', context);
   assert.equal(lookups, 1);
   assert.equal(verificationMessages, 1);
+});
+
+test('refresh restores externally deleted events immediately, then skips unchanged healthy events', async () => {
+  const input = [{ id: 'pl:1:assessment:2', dueAtLocal: '2020-01-01 11:00:00', syncState: 'synced' }];
+  const local = { prairierunCalendarRepairVersion: 2, prairierunLastDailyCalendarSync: Date.now() };
+  let missing = false;
+  let duplicate = false;
+  let inspectionFails = false;
+  let exports = 0;
+  const context = { console: { log: () => {} }, input,
+    PrairieRunCalendar: {
+      inspectAssignmentEvents: async () => {
+        if (inspectionFails) throw new Error('Network unavailable');
+        return { missingIds: missing ? [input[0].id] : [], duplicateIds: duplicate ? [input[0].id] : [] };
+      },
+      exportAssignments: async (items) => {
+        exports++;
+        const results = items.map((assignment) => ({ assignment, status: missing ? 'added' : 'updated', removedDuplicates: duplicate ? 1 : 0 }));
+        missing = false;
+        duplicate = false;
+        return results;
+      },
+    },
+    PrairieRunExt: {
+      storageLocalGet: async () => structuredClone(local),
+      storageLocalSet: async (value) => Object.assign(local, structuredClone(value)),
+      tabsSendMessage: async () => {}, addRuntimeMessageListener: () => {}, addStorageChangedListener: () => {},
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../extension/background.js'), 'utf8'), context);
+  const run = () => vm.runInContext('notifyHomeTab(1, input, new Set())', context);
+  await run();
+  assert.equal(exports, 0);
+  missing = true;
+  await run();
+  assert.equal(exports, 1);
+  assert.equal(local.prairierunSyncStatus.restoredEvents, 1);
+  assert.match(local.prairierunSyncStatus.current, /Restored 1/);
+  await run();
+  assert.equal(exports, 1);
+  duplicate = true;
+  await run();
+  assert.equal(exports, 2);
+  assert.equal(local.prairierunSyncStatus.removedDuplicates, 1);
+  inspectionFails = true;
+  await run();
+  assert.equal(exports, 2);
+  assert.equal(local.prairierunSyncStatus.state, 'error');
 });

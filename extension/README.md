@@ -9,6 +9,7 @@
 - Extracts assignments, course names, scores, source URLs, due timestamps, and time zones.
 - Merges base assessments and numbered assessment instances.
 - Prevents duplicate creation during overlapping syncs and network retries.
+- Checks for missing or duplicate Calendar events on each scan and restores deleted dated assignments without waiting for the daily reconciliation.
 - Repairs confirmed duplicate PrairieRun events on the first scan after this update; no data reset is needed.
 - Automatically links original assessment events to existing attempts through verified PrairieLearn redirects, including when local assignment history was cleared.
 - Stores assignments locally in Chrome.

@@ -56,6 +56,10 @@ agent-facing project rules.
 When an eligible assignment event is recreated after manual deletion, it uses
 the current completion color and reminders. Deleted Google event IDs are
 handled explicitly so restoration does not silently fail on an ID conflict.
+Refreshing PrairieLearn checks for externally deleted assignment events and
+restores them during the same scan. The popup reports the number restored.
+Healthy unchanged events are checked without being rewritten. Removing an
+assignment's date in PrairieRun still excludes it from Calendar sync.
 
 Calendar sync repairs confirmed duplicate PrairieRun events automatically:
 one event retains the assignment's latest date, completion color, and reminders.
