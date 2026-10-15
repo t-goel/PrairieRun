@@ -124,6 +124,9 @@ live dependency even though it is not loaded as a content script.
   Titles narrow candidates but never authorize merging; only exact server
   redirects establish new links. Persist verified links in
   prairierunAssignmentLinks and reuse them without user input.
+- Popup status listens for sync-status storage updates and distinguishes
+  Calendar syncing from completed scanning. A completed Calendar repair reports
+  the actual number of removed duplicates after the API calls succeed.
 - The repair-version marker forces a full reconciliation on the next scan
   after upgrading. Advance it and the daily-success timestamp only when all
   exported assignments succeed; expose partial failures in the popup status.

@@ -30,7 +30,8 @@ function refreshState() {
     if (!response?.ok) return;
     applySettings(response.settings);
     if (response.sync?.state === "scanning") showStatus(`${response.sync.current || "Scanning…"} (${response.sync.found || 0} found)`);
-    if (response.sync?.state === "complete") contextElement.textContent = "PrairieLearn detected.";
+    if (response.sync?.state === "syncing") showStatus(response.sync.current || "Synchronizing Google Calendar…");
+    if (response.sync?.state === "complete") showStatus(response.sync.current || "PrairieLearn detected.");
     if (response.sync?.state === "error") showStatus(response.sync.current || "Scan failed.", true);
   }).catch((error) => showStatus(error.message, true));
 }
@@ -44,6 +45,10 @@ PrairieRunExt.tabsQuery({ active: true, currentWindow: true }).then(([tab]) => {
 }).catch(() => undefined);
 
 refreshState();
+
+PrairieRunExt.addStorageChangedListener((changes, areaName) => {
+  if (areaName === "local" && changes.prairierunSyncStatus) refreshState();
+});
 
 notificationLeadElement.addEventListener("change", async () => {
   const hours = Number(notificationLeadElement.value);

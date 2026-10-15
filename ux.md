@@ -65,6 +65,9 @@ Reloading this update and opening PrairieLearn triggers the initial duplicate
 repair automatically. There is no need to clear data or delete calendars.
 The popup reports failed assignments so a partial repair is not shown as a
 successful synchronization.
+During Calendar writes the popup says "Synchronizing Google Calendar…" and
+updates live. Completed repairs report how many duplicate events were removed;
+Google sign-in or a completed page scan alone does not mean repair succeeded.
 This source-link repair runs again after updating, even if the earlier repair
 finished. Newly discovered attempt links also trigger repair automatically.
 When an original link disappears after starting work, a unique historical

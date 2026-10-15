@@ -141,6 +141,9 @@ test('a clean scan learns, saves and reuses server-verified parent links without
   context.detected = scan.detectedIds;
   context.saved = scan.merged;
   await vm.runInContext('notifyHomeTab(1, saved, detected)', context);
+  assert.equal(local.prairierunSyncStatus.state, 'complete');
+  assert.equal(local.prairierunSyncStatus.removedDuplicates, 1);
+  assert.match(local.prairierunSyncStatus.current, /Removed 1/);
   await vm.runInContext('saveScanResult(input, 1)', context);
   assert.equal(lookups, 1);
   assert.equal(verificationMessages, 1);

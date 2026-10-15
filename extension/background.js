@@ -279,6 +279,7 @@ async function notifyHomeTab(tabId, assignments, detectedIds) {
   const eligible = assignments.filter((item) => (dailySyncDue || detectedIds.has(item.id)) && item.dueAtLocal && item.syncState !== "stale" && (dailySyncDue || item.identityRepairPending || isCurrentAssignment(item)));
   if (eligible.length) {
     debugLog(dailySyncDue ? "Running daily Calendar synchronization" : "Automatically synchronizing Calendar assignments", { count: eligible.length });
+    await setSyncStatus({ state: "syncing", current: "Synchronizing Google Calendar…", found: assignments.length });
     try {
       const exportResults = await PrairieRunCalendar.exportAssignments(eligible);
       debugLog("Calendar reconciliation results", exportResults.map((result) => ({
@@ -297,6 +298,12 @@ async function notifyHomeTab(tabId, assignments, detectedIds) {
       }
       await PrairieRunExt.storageLocalSet(updates);
       if (failed.length) await setSyncStatus({ state: "error", current: `${failed.length} Calendar assignment(s) could not sync: ${failed[0].reason}` });
+      else {
+        const removed = exportResults.reduce((total, result) => total + (result.removedDuplicates || 0), 0);
+        await setSyncStatus({ state: "complete", current: removed
+          ? `Calendar synced. Removed ${removed} duplicate event(s).` : "Google Calendar synced.",
+          found: assignments.length, removedDuplicates: removed });
+      }
       await sendHomeUpdate(tabId, assignments, exportResults);
     } catch (error) {
       debugLog("Automatic Calendar synchronization failed", { error: error.message });
