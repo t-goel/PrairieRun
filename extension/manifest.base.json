@@ -30,6 +30,7 @@
         "prairielearn-adapter.js",
         "view-utils.js",
         "home-panel.js",
+        "identity-resolver.js",
         "content.js"
       ],
       "css": [

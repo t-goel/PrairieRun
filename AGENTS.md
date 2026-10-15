@@ -119,6 +119,11 @@ live dependency even though it is not loaded as a content script.
   redirect middleware but never its GET '/' start handler. Follow only exact
   same-origin/course/instance redirects; errors or unsupported servers leave
   identities unresolved. Never substitute the bare assessment route.
+- Automatic scans inspect marked Calendar events for unresolved instance-only
+  assignments, then ask the PrairieLearn content script to verify candidates.
+  Titles narrow candidates but never authorize merging; only exact server
+  redirects establish new links. Persist verified links in
+  prairierunAssignmentLinks and reuse them without user input.
 - The repair-version marker forces a full reconciliation on the next scan
   after upgrading. Advance it and the daily-success timestamp only when all
   exported assignments succeed; expose partial failures in the popup status.
@@ -191,6 +196,7 @@ node stage0/test-adapter-core.js
 node stage0/test-capture-bundle.js
 node --test stage0/test-firefox-support.js
 node --test stage0/test-assignment-dedup.js stage0/test-calendar-dedup.js stage0/test-calendar-repair.js
+node --test stage0/test-identity-resolver.js
 ```
 
 The capture-bundle check requires the private, gitignored capture JSON file;

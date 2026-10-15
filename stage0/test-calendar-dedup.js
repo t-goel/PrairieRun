@@ -145,3 +145,22 @@ test('assessment and instance source links repair legacy events with different m
   assert.ok(h.events.some((event) => event.id === 'other'));
   assert.ok(h.events.some((event) => event.id === 'personal'));
 });
+
+test('legacy marked events supply automatic candidates, but title alone does not repair them', async () => {
+  const original = marked('original', 'pl:229304:assessment:2724826');
+  original.summary = '[CS 411] Group Activity 9: B+ Trees Automated';
+  original.description = 'PrairieLearn source: https://us.prairielearn.com/pl/course_instance/229304/assessment/2724826/';
+  const h = harness({ initial: [original] });
+  h.local.prairierunCalendarMappings['229304'] = 'class';
+  const item = { ...assignment, id: 'pl:229304:instance:15272849', assessmentId: null,
+    instanceId: '15272849', courseInstanceId: '229304', courseName: 'CS 411',
+    title: 'Group Activity 9: B+ Trees Automated', assignmentAliases: [],
+    sourceUrl: 'https://us.prairielearn.com/pl/course_instance/229304/assessment_instance/15272849/' };
+  const candidates = await h.api.findParentCandidates([item]);
+  assert.equal(JSON.stringify(candidates), JSON.stringify([
+    { courseInstanceId: '229304', assessmentId: '2724826', instanceId: '15272849' },
+  ]));
+  assert.equal(h.calls.filter((call) => ['POST', 'PATCH', 'DELETE'].includes(call.method)).length, 0);
+  assert.equal(h.events.length, 1);
+  assert.equal(JSON.stringify(await h.api.findParentCandidates([{ ...item, title: 'Different homework' }])), '[]');
+});

@@ -10,6 +10,7 @@
 - Merges base assessments and numbered assessment instances.
 - Prevents duplicate creation during overlapping syncs and network retries.
 - Repairs confirmed duplicate PrairieRun events on the first scan after this update; no data reset is needed.
+- Automatically links original assessment events to existing attempts through verified PrairieLearn redirects, including when local assignment history was cleared.
 - Stores assignments locally in Chrome.
 - Shows an embedded assignment panel directly below the PrairieLearn course links, grouped by class.
 - Shows assignments due today or later; full Calendar reconciliation also updates dated past assignments.

@@ -68,9 +68,11 @@ successful synchronization.
 This source-link repair runs again after updating, even if the earlier repair
 finished. Newly discovered attempt links also trigger repair automatically.
 When an original link disappears after starting work, a unique historical
-course/label/title match can restore its relationship to the attempt. If local
-history was cleared, an explicit confirmed link is needed; titles alone never
-authorize deleting Calendar events.
+course/label/title match can restore its relationship to the attempt. With no
+history, PrairieRun automatically verifies original links from old Calendar
+events against the logged-in PrairieLearn session. Users do not need to enter
+each pair manually. Unsupported redirects or login failures leave the events
+alone; titles alone never authorize deleting Calendar events.
 The popup completion control says "Complete above" the threshold to make the
 strict comparison clear; exactly 95% is incomplete at the default threshold.
 

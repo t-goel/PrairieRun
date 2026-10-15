@@ -14,6 +14,15 @@ assessment subpath: PrairieLearn's studentAssessmentRedirect middleware can
 redirect to an existing attempt, while the unused path never executes the
 assessment GET '/' handler that can start homework. Exact same-origin, course,
 and instance checks are required; failure leaves the relationship unresolved.
+During saveScanResult, unresolved instance records obtain candidate parent IDs
+from marked events in their class calendars. Titles only narrow that search.
+The home/course content script verifies candidates through identity-resolver.js,
+and successful redirects are cached in prairierunAssignmentLinks. Historical
+and cached identity resolution runs first to avoid repeated verification.
+
+The redirect behavior is based on PrairieLearn's public
+[studentAssessmentRedirect middleware](https://github.com/PrairieLearn/PrairieLearn/blob/master/apps/prairielearn/src/middlewares/studentAssessmentRedirect.ts)
+and [studentAssessment router](https://github.com/PrairieLearn/PrairieLearn/blob/master/apps/prairielearn/src/pages/studentAssessment/studentAssessment.ts).
 
 calendar.js serializes exports and removals through one write queue. New event
 IDs use a SHA-256 hash of the canonical assignment ID, so retried inserts reuse
@@ -41,7 +50,8 @@ past-due work and clear their pending flag only after a successful update.
 The current course page may replace an unstarted assessment link with only an
 instance link. Before merging scan results, background.js resolves a unique
 historical parent using the course ID, assessment label, and exact title.
-With no history, prairierunAssignmentLinks accepts explicit user-confirmed
+With no history, server-verified links are discovered automatically from old
+Calendar events; prairierunAssignmentLinks also accepts explicit user-confirmed
 instance-to-assessment IDs, validated within one course. Recovered records use
 the canonical assessment ID, retain the instance alias, and become pending
 repair. Fetching assessment definitions to follow redirects is avoided because

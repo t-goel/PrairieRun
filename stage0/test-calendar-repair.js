@@ -106,3 +106,42 @@ test('instance-only scans recover parent identity from history or a confirmed sa
   context.history = [{ ...original, label: 'GA:10' }];
   assert.equal(run()[0].id, instance.id); // Same title alone isn't evidence.
 });
+
+test('a clean scan learns, saves and reuses server-verified parent links without manual settings', async () => {
+  const item = { id: 'pl:229304:instance:15272849', courseInstanceId: '229304',
+    instanceId: '15272849', assessmentId: null, label: 'GA:9', title: 'B+ Trees',
+    dueAtLocal: '2026-10-16 23:59:00', completionStatus: 'completed', score: 100,
+    sourceUrl: 'https://us.prairielearn.com/pl/course_instance/229304/assessment_instance/15272849/' };
+  const local = { prairierunAssignments: [{ ...item, syncState: 'synced' }] };
+  let lookups = 0;
+  let verificationMessages = 0;
+  const context = { URL, console: { log: () => {} }, input: [item],
+    PrairieRunCalendar: {
+      findParentCandidates: async () => { lookups++; return [{ courseInstanceId: '229304', assessmentId: '2724826', instanceId: '15272849' }]; },
+      exportAssignments: async (items) => items.map((assignment) => ({ assignment, status: 'updated', removedDuplicates: 1 })),
+    },
+    PrairieRunExt: {
+      storageLocalGet: async () => structuredClone(local),
+      storageLocalSet: async (value) => Object.assign(local, structuredClone(value)),
+      addRuntimeMessageListener: () => {}, addStorageChangedListener: () => {},
+      tabsSendMessage: async (_tab, message) => {
+        if (message.type !== 'PRAIRIERUN_RESOLVE_IDENTITIES') return;
+        verificationMessages++;
+        assert.equal(message.candidates[0].assessmentId, '2724826');
+        return { ok: true, links: { 'pl:229304:instance:15272849': 'pl:229304:assessment:2724826' } };
+      },
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../extension/background.js'), 'utf8'), context);
+  const scan = await vm.runInContext('saveScanResult(input, 1)', context);
+  assert.equal(scan.merged[0].id, 'pl:229304:assessment:2724826');
+  assert.equal(scan.merged[0].score, 100);
+  assert.equal(local.prairierunAssignmentLinks[item.id], 'pl:229304:assessment:2724826');
+  context.detected = scan.detectedIds;
+  context.saved = scan.merged;
+  await vm.runInContext('notifyHomeTab(1, saved, detected)', context);
+  await vm.runInContext('saveScanResult(input, 1)', context);
+  assert.equal(lookups, 1);
+  assert.equal(verificationMessages, 1);
+});

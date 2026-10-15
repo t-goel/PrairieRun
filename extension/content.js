@@ -4,6 +4,12 @@ PrairieRunExt.addRuntimeMessageListener((message, _sender, sendResponse) => {
     window.PrairieRunHomePanel?.update(message.assignments || []);
     return false;
   }
+  if (message?.type === "PRAIRIERUN_RESOLVE_IDENTITIES") {
+    window.PrairieRunIdentity.resolveParentCandidates(message.candidates || [], location.href)
+      .then((links) => sendResponse({ ok: true, links }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
   if (message?.type !== "PRAIRIERUN_READ_PAGE") return undefined;
   PrairieRunExt.storageLocalGet("prairierunSettings").then((stored) => {
     try {

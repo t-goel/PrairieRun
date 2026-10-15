@@ -87,10 +87,25 @@ function normalizeStoredAssignment(assignment, existing, now, syncedCompletion) 
   };
 }
 
-async function saveScanResult(assignments) {
+async function saveScanResult(assignments, sourceTabId) {
   const stored = await PrairieRunExt.storageLocalGet([ASSIGNMENTS_KEY, BACKGROUND_CALENDAR_SYNC_KEY, ASSIGNMENT_LINKS_KEY]);
   const previous = new Map((stored[ASSIGNMENTS_KEY] || []).map((item) => [item.id, item]));
-  const resolvedAssignments = resolveHistoricalIdentities(assignments, stored[ASSIGNMENTS_KEY] || [], stored[ASSIGNMENT_LINKS_KEY] || {});
+  let resolvedAssignments = resolveHistoricalIdentities(assignments, stored[ASSIGNMENTS_KEY] || [], stored[ASSIGNMENT_LINKS_KEY] || {});
+  if (sourceTabId && resolvedAssignments.some((item) => !item.assessmentId && item.instanceId && item.dueAtLocal)) {
+    try {
+      const candidates = await PrairieRunCalendar.findParentCandidates(resolvedAssignments);
+      if (candidates.length) {
+        const response = await PrairieRunExt.tabsSendMessage(sourceTabId, { type: "PRAIRIERUN_RESOLVE_IDENTITIES", candidates });
+        if (!response?.ok) throw new Error(response?.error || "Could not verify assessment identities.");
+        const links = { ...(stored[ASSIGNMENT_LINKS_KEY] || {}), ...(response.links || {}) };
+        await PrairieRunExt.storageLocalSet({ [ASSIGNMENT_LINKS_KEY]: links });
+        resolvedAssignments = resolveHistoricalIdentities(resolvedAssignments, stored[ASSIGNMENTS_KEY] || [], links);
+        debugLog("Automatic assessment identity verification", { candidates: candidates.length, verified: Object.keys(response.links || {}).length });
+      }
+    } catch (error) {
+      debugLog("Automatic assessment identity verification unavailable", { error: error.message });
+    }
+  }
   const calendarSync = stored[BACKGROUND_CALENDAR_SYNC_KEY] || {};
   const now = new Date().toISOString();
   const detectedIds = new Set();
@@ -132,7 +147,7 @@ function resolveHistoricalIdentities(assignments, history, confirmedLinks) {
       source = `${url.origin}/pl/course_instance/${course}/assessment/${assessmentId}/`;
     } catch { return item; }
     debugLog("Recovered parent assessment identity", { instanceId: item.instanceId, assessmentId,
-      evidence: configuredMatch && configuredMatch[1] === course ? "user-confirmed link" : "historical course, label and title" });
+      evidence: configuredMatch && configuredMatch[1] === course ? "verified identity link" : "historical course, label and title" });
     return { ...item, id: canonicalId, assessmentId,
       assignmentAliases: [...new Set([originalId, canonicalId, ...(item.assignmentAliases || [])])],
       sourceUrls: [...new Set([source, item.sourceUrl, ...(item.sourceUrls || [])])],
@@ -220,7 +235,7 @@ async function startScan(sourceTabId) {
   const home = await readPage(sourceTabId);
   debugLog("Source page classified", { sourceTabId, pageType: home.pageType, courseLinkCount: home.courseLinks?.length || 0, assignmentCount: home.assignments?.length || 0 });
   if (home.pageType === "course") {
-    const result = await saveScanResult(home.assignments || []);
+    const result = await saveScanResult(home.assignments || [], sourceTabId);
     await setSyncStatus({ state: "complete", completed: 1, total: 1, found: result.merged.length, current: "Ready" });
     return result;
   }
@@ -236,7 +251,7 @@ async function startScan(sourceTabId) {
     allAssignments.push(...assignments);
     await setSyncStatus({ state: "scanning", current: `Scanned ${index + 1} of ${courseLinks.length} classes`, completed: index + 1, total: courseLinks.length, found: allAssignments.length });
   }
-  const result = await saveScanResult(allAssignments);
+  const result = await saveScanResult(allAssignments, sourceTabId);
   debugLog("Scan results saved", { assignmentCount: result.merged.length, detectedCount: result.detectedIds.size });
   await setSyncStatus({ state: "complete", completed: courseLinks.length, total: courseLinks.length, found: result.merged.length, current: "Ready" });
   return result;

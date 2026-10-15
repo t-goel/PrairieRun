@@ -209,6 +209,42 @@ async function exportAssignments(assignments) {
   return queueWrite(() => exportAssignmentsNow(snapshot));
 }
 
+async function findParentCandidates(assignments) {
+  const unresolved = assignments.filter((item) => item.instanceId && !item.assessmentId && item.dueAtLocal);
+  if (!unresolved.length) return [];
+  const token = await getCalendarToken();
+  const calendars = await listWritableCalendars(token);
+  const stored = await PrairieRunExt.storageLocalGet(CALENDAR_MAPPINGS_KEY);
+  const mappings = stored[CALENDAR_MAPPINGS_KEY] || {};
+  const eventCache = new Map();
+  const candidates = new Map();
+  for (const item of unresolved) {
+    const course = String(item.courseInstanceId);
+    const relatedCalendars = calendars.filter((calendar) => calendar.id === mappings[course]
+      || calendar.summary === `PrairieLearn — ${item.courseName}`);
+    for (const calendar of relatedCalendars) {
+      if (!eventCache.has(calendar.id)) eventCache.set(calendar.id, await listMarkedEvents(calendar.id, token));
+      for (const event of eventCache.get(calendar.id)) {
+        // Title narrows candidates only. A server redirect must verify the
+        // relationship before any alias is saved or event is removed.
+        if (event.summary !== `[${item.courseName}] ${item.title}`) continue;
+        const urls = [event.extendedProperties?.private?.sourceUrl,
+          event.description?.match(/PrairieLearn source:\s*(https:\/\/[^\s<>]+)/)?.[1]];
+        for (const url of urls) {
+          const identity = sourceIdentity(url);
+          if (!identity) continue;
+          const parsed = new URL(identity);
+          const match = parsed.pathname.match(/^\/pl\/course_instance\/(\d+)\/assessment\/(\d+)$/);
+          if (!match || match[1] !== course || parsed.origin !== new URL(item.sourceUrl).origin) continue;
+          const candidate = { courseInstanceId: course, assessmentId: match[2], instanceId: String(item.instanceId) };
+          candidates.set(`${course}:${match[2]}:${item.instanceId}`, candidate);
+        }
+      }
+    }
+  }
+  return [...candidates.values()];
+}
+
 async function exportAssignmentsNow(assignments) {
   if (!assignments.length) throw new Error("No assignments with due dates are ready to sync.");
   const token = await getCalendarToken();
@@ -300,5 +336,7 @@ async function removeAssignmentEventNow(assignment) {
   return { status: events.length ? "removed" : "skipped", assignment, eventId: events[0]?.id };
 }
 
-globalThis.PrairieRunCalendar = { exportAssignments, removeAssignmentEvent };
+globalThis.PrairieRunCalendar = { exportAssignments, removeAssignmentEvent,
+  findParentCandidates: (assignments) => queueWrite(() => findParentCandidates(structuredClone(assignments))),
+};
 })();
