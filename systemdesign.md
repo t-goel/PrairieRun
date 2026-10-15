@@ -9,6 +9,12 @@ marked by its current disposition. Future agent-facing project rules live in
 
 ## Current runtime architecture
 
+identity-resolver.js verifies parent/attempt relationships using an unused
+assessment subpath: PrairieLearn's studentAssessmentRedirect middleware can
+redirect to an existing attempt, while the unused path never executes the
+assessment GET '/' handler that can start homework. Exact same-origin, course,
+and instance checks are required; failure leaves the relationship unresolved.
+
 calendar.js serializes exports and removals through one write queue. New event
 IDs use a SHA-256 hash of the canonical assignment ID, so retried inserts reuse
 the same ID and recover an existing marked event on HTTP 409. Calendar creation

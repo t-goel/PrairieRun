@@ -114,6 +114,11 @@ live dependency even though it is not loaded as a content script.
   explicit instance-to-assessment IDs via prairierunAssignmentLinks local
   storage; validate same-course IDs. Never probe assessment URLs automatically:
   a GET to an unstarted homework can create an attempt in PrairieLearn.
+- identity-resolver.js may verify existing attempts through the unused
+  /assessment/{id}/__prairierun_identity__ subpath, which reaches PrairieLearn's
+  redirect middleware but never its GET '/' start handler. Follow only exact
+  same-origin/course/instance redirects; errors or unsupported servers leave
+  identities unresolved. Never substitute the bare assessment route.
 - The repair-version marker forces a full reconciliation on the next scan
   after upgrading. Advance it and the daily-success timestamp only when all
   exported assignments succeed; expose partial failures in the popup status.
