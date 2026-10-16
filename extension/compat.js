@@ -101,6 +101,20 @@
     }
   }
 
+  async function removeSessionValue(key) {
+    memorySession.delete(key);
+    if (hasSessionStorage()) {
+      try {
+        const area = storageArea("session");
+        if (typeof area.remove === "function") {
+          await callAsync(area, "remove", key);
+        }
+      } catch (_error) {
+        // The in-memory copy is already cleared.
+      }
+    }
+  }
+
   const PrairieRunExt = {
     isFirefox,
     storageLocalGet: (keys) => storageGet("local", keys),
@@ -109,6 +123,7 @@
     getSessionValue,
     setSessionValue,
     clearSessionValues,
+    removeSessionValue,
     tabsCreate: (options) => callAsync(ext.tabs, "create", options),
     tabsRemove: (tabId) => callAsync(ext.tabs, "remove", tabId),
     tabsQuery: (query) => callAsync(ext.tabs, "query", query),

@@ -28,6 +28,9 @@
 #prairierun-home-panel .prr-collapsed summary { cursor: pointer; }
 #prairierun-home-panel a { text-decoration: none; }
 #prairierun-home-panel a:hover { text-decoration: underline; }
+#prairierun-home-panel .prr-auth { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .5rem 1rem; border-top: 1px solid rgba(0,0,0,.125); font-size: .78rem; }
+#prairierun-home-panel .prr-auth-actions { display: flex; gap: .4rem; }
+#prairierun-home-panel .prr-auth-error { padding: 0 1rem .5rem; font-size: .78rem; }
 .prr-date-dialog { border: 0; border-radius: .5rem; padding: 1.25rem; box-shadow: 0 .5rem 1.5rem rgba(0,0,0,.25); }
 .prr-date-dialog::backdrop { background: rgba(0,0,0,.35); }
 .prr-date-dialog form { display: grid; gap: .75rem; min-width: 280px; }
