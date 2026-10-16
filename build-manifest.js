@@ -25,7 +25,7 @@ const DEFAULT_GECKO_ID = "prairierun@example.com";
 const FIREFOX_MIN_VERSION = "115.0";
 // Background page load order: the compat shim first, then the calendar
 // module that depends on it, then the scanner that depends on both.
-const FIREFOX_BACKGROUND_SCRIPTS = ["compat.js", "calendar.js", "background.js"];
+const FIREFOX_BACKGROUND_SCRIPTS = ["compat.js", "oauth-config.js", "auth-utils.js", "deadline-model.js", "source-registry.js", "net.js", "parse-host.js", "prairielearn-adapter.js", "identity-resolver.js", "source-prairielearn.js", "source-canvas.js", "source-gradescope.js", "source-prairietest.js", "ics-parse.js", "ics-writer.js", "deadline-store.js", "outputs.js", "relay-push.js", "calendar.js", "sync-orchestrator.js", "background.js"];
 
 function parseArgs(argv) {
   const args = { target: null, out: "dist-firefox", geckoId: DEFAULT_GECKO_ID, check: false };
@@ -63,6 +63,21 @@ function buildChromeManifest() {
 function buildFirefoxManifest(geckoId) {
   const manifest = readBase();
   manifest.background = { scripts: [...FIREFOX_BACKGROUND_SCRIPTS] };
+  // Firefox has no chrome.offscreen; drop it from permissions.
+  if (Array.isArray(manifest.permissions)) {
+    manifest.permissions = manifest.permissions.filter((entry) => entry !== "offscreen");
+  }
+  // Firefox 115 ESR rejects optional_host_permissions in some contexts, and
+  // Firefox MV3 host permissions are user-grantable anyway. Move optional
+  // hosts into host_permissions for Firefox.
+  if (Array.isArray(manifest.optional_host_permissions)) {
+    const merged = [...(manifest.host_permissions || [])];
+    for (const entry of manifest.optional_host_permissions) {
+      if (!merged.includes(entry)) merged.push(entry);
+    }
+    manifest.host_permissions = merged;
+    delete manifest.optional_host_permissions;
+  }
   manifest.browser_specific_settings = {
     gecko: { id: geckoId, strict_min_version: FIREFOX_MIN_VERSION },
   };

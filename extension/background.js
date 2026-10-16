@@ -2,7 +2,7 @@
 // calendar module. In Firefox's scripts-array background page (or any context
 // where the manifest already loaded them in order) `importScripts` is either
 // undefined or the modules already exist, so this is a no-op there.
-if (typeof importScripts === "function" && !globalThis.PrairieRunCalendar) importScripts("compat.js", "calendar.js");
+if (typeof importScripts === "function" && !globalThis.PrairieRunCalendar) importScripts("compat.js", "oauth-config.js", "auth-utils.js", "deadline-model.js", "source-registry.js", "net.js", "parse-host.js", "prairielearn-adapter.js", "identity-resolver.js", "source-prairielearn.js", "source-canvas.js", "source-gradescope.js", "source-prairietest.js", "ics-parse.js", "ics-writer.js", "deadline-store.js", "outputs.js", "relay-push.js", "calendar.js", "sync-orchestrator.js");
 
 const ASSIGNMENTS_KEY = "prairierunAssignments";
 const SYNC_KEY = "prairierunSyncStatus";
@@ -119,6 +119,16 @@ async function saveScanResult(assignments, sourceTabId) {
   const scannedIds = new Set(merged.map((item) => item.id));
   const stale = (stored[ASSIGNMENTS_KEY] || []).filter((item) => !scannedIds.has(item.id)).map((item) => ({ ...item, syncState: "stale" }));
   await PrairieRunExt.storageLocalSet({ [ASSIGNMENTS_KEY]: [...merged, ...stale] });
+  // PR 1 scaffold: mirror the authoritative legacy assignments into the
+  // normalized deadline store. Calendar and panel still read the legacy key.
+  try {
+    if (globalThis.PrairieRunModel?.fromLegacyPlAssignment) {
+      const deadlines = merged.map((item) => globalThis.PrairieRunModel.fromLegacyPlAssignment(item));
+      await PrairieRunExt.storageLocalSet({ prairierunDeadlines: deadlines });
+    }
+  } catch (error) {
+    debugLog("Deadline mirror failed", { error: error?.message || String(error) });
+  }
   return { merged, detectedIds };
 }
 
