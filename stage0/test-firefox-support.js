@@ -146,17 +146,28 @@ test("firefox manifest swaps in a scripts-array background and the gecko identit
     execFileSync(process.execPath, [path.join(ROOT, "build-manifest.js"), "--target=firefox", `--out=${outDir}`], { stdio: "pipe" });
     const base = JSON.parse(fs.readFileSync(BASE_MANIFEST_PATH, "utf8"));
     const firefox = JSON.parse(fs.readFileSync(path.join(outDir, "manifest.json"), "utf8"));
-    const { browser_specific_settings, background, ...rest } = firefox;
-    const { background: _baseBackground, ...baseRest } = base;
+    const { browser_specific_settings, background, permissions, host_permissions, ...rest } = firefox;
+    const { background: _baseBackground, permissions: _basePermissions, host_permissions: _baseHosts, optional_host_permissions: _baseOptional, ...baseRest } = base;
     void _baseBackground;
+    void _basePermissions;
+    void _baseHosts;
+    void _baseOptional;
     assert.deepEqual(rest, baseRest);
+    // Firefox has no chrome.offscreen; the permission is dropped.
+    assert.deepEqual(permissions, (base.permissions || []).filter((entry) => entry !== "offscreen"));
+    // Optional hosts are merged into host_permissions for Firefox 115 ESR.
+    const expectedHosts = [...(base.host_permissions || [])];
+    for (const entry of base.optional_host_permissions || []) {
+      if (!expectedHosts.includes(entry)) expectedHosts.push(entry);
+    }
+    assert.deepEqual(host_permissions, expectedHosts);
+    assert.ok(!("optional_host_permissions" in firefox), "Firefox has no optional_host_permissions");
     // scripts array (not service_worker: Firefox only enables that on 121+)
-    // with the shim, OAuth config, auth helpers, and calendar module ahead
-    // of the scanner.
-    assert.deepEqual(background, { scripts: ["compat.js", "oauth-config.js", "auth-utils.js", "calendar.js", "background.js"] });
+    // with the full PR-1 scaffold load order.
+    assert.deepEqual(background, { scripts: ["compat.js", "oauth-config.js", "auth-utils.js", "deadline-model.js", "source-registry.js", "net.js", "parse-host.js", "prairielearn-adapter.js", "identity-resolver.js", "source-prairielearn.js", "source-canvas.js", "source-gradescope.js", "source-prairietest.js", "ics-parse.js", "ics-writer.js", "deadline-store.js", "outputs.js", "relay-push.js", "calendar.js", "sync-orchestrator.js", "background.js"] });
     assert.equal(browser_specific_settings.gecko.strict_min_version, "115.0");
     assert.match(browser_specific_settings.gecko.id, /@/);
-    for (const file of ["compat.js", "oauth-config.js", "auth-utils.js", "calendar.js", "background.js", "content.js", "home-panel.js", "popup.js"]) {
+    for (const file of ["compat.js", "oauth-config.js", "auth-utils.js", "deadline-model.js", "source-registry.js", "calendar.js", "background.js", "content.js", "home-panel.js", "popup.js", "options.html"]) {
       assert.ok(fs.existsSync(path.join(outDir, file)), `dist ships ${file}`);
     }
   } finally {
