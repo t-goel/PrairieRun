@@ -101,6 +101,81 @@
     }
   }
 
+  async function removeSessionValue(key) {
+    memorySession.delete(key);
+    if (hasSessionStorage()) {
+      try {
+        const area = storageArea("session");
+        if (typeof area.remove === "function") {
+          await callAsync(area, "remove", key);
+        }
+      } catch (_error) {
+        // The in-memory copy is already cleared.
+      }
+    }
+  }
+
+  // Offscreen document management (Chrome only; Firefox parses in the
+  // background page). Only one offscreen document can exist, so concurrent
+  // callers share a module-level promise.
+  let offscreenReady = null;
+
+  function offscreenEnsure() {
+    // Firefox has no chrome.offscreen API; parsing runs in place there.
+    if (isFirefox) return Promise.resolve(false);
+    if (offscreenReady) return offscreenReady;
+    const attempt = (async () => {
+      const runtime = ext?.runtime;
+      if (runtime && typeof runtime.getContexts === "function") {
+        try {
+          const contexts = await callAsync(runtime, "getContexts", { contextTypes: ["OFFSCREEN_DOCUMENT"] });
+          if (Array.isArray(contexts) && contexts.length) return true;
+        } catch (_error) {
+          // Older Chrome without getContexts: fall through to create.
+        }
+      }
+      const offscreen = ext?.offscreen;
+      if (!offscreen || typeof offscreen.createDocument !== "function") {
+        throw new Error("Extension offscreen API is unavailable.");
+      }
+      try {
+        await callAsync(offscreen, "createDocument", {
+          url: "offscreen.html",
+          reasons: ["DOM_PARSER"],
+          justification: "Parse fetched course pages locally",
+        });
+      } catch (error) {
+        // A concurrent creator may have won the race; that still satisfies us.
+        if (/only one offscreen|already exists/i.test(error?.message || "")) return true;
+        throw error;
+      }
+      return true;
+    })();
+    offscreenReady = attempt;
+    attempt.then(
+      () => undefined,
+      () => {
+        if (offscreenReady === attempt) offscreenReady = null;
+      }
+    );
+    return offscreenReady;
+  }
+
+  function permissionsContains(origins) {
+    const perms = ext?.permissions;
+    // No permissions API (tests): assume granted so background logic still runs.
+    if (!perms || typeof perms.contains !== "function") return Promise.resolve(true);
+    return callAsync(perms, "contains", { origins: [...origins] }).then(Boolean);
+  }
+
+  function permissionsRequest(origins) {
+    const perms = ext?.permissions;
+    if (!perms || typeof perms.request !== "function") {
+      return Promise.reject(new Error("Extension permissions API is unavailable."));
+    }
+    return callAsync(perms, "request", { origins: [...origins] }).then(Boolean);
+  }
+
   const PrairieRunExt = {
     isFirefox,
     storageLocalGet: (keys) => storageGet("local", keys),
@@ -109,6 +184,7 @@
     getSessionValue,
     setSessionValue,
     clearSessionValues,
+    removeSessionValue,
     tabsCreate: (options) => callAsync(ext.tabs, "create", options),
     tabsRemove: (tabId) => callAsync(ext.tabs, "remove", tabId),
     tabsQuery: (query) => callAsync(ext.tabs, "query", query),
@@ -119,6 +195,12 @@
     identityLaunchWebAuthFlow: (details) => callAsync(ext.identity, "launchWebAuthFlow", details),
     addRuntimeMessageListener: (listener) => ext.runtime.onMessage.addListener(listener),
     addStorageChangedListener: (listener) => ext.storage.onChanged.addListener(listener),
+    addStartupListener: (listener) => ext?.runtime?.onStartup?.addListener(listener),
+    addInstalledListener: (listener) => ext?.runtime?.onInstalled?.addListener(listener),
+    offscreenEnsure,
+    permissionsContains,
+    permissionsRequest,
+    tabsCreateForeground: (url) => callAsync(ext.tabs, "create", { url, active: true }),
     alarmsCreate: (name, info) => ext.alarms ? callAsync(ext.alarms, "create", name, info) : Promise.reject(new Error("Extension alarms API is unavailable.")),
     addAlarmsListener: (listener) => ext.alarms?.onAlarm?.addListener(listener),
     addTabsUpdatedListener: (listener) => ext.tabs.onUpdated.addListener(listener),

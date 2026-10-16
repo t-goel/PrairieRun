@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "scripts": {
+    "test": "node --test stage0/test-adapter-core.js stage0/test-assignment-dedup.js stage0/test-calendar-dedup.js stage0/test-calendar-repair.js stage0/test-identity-resolver.js stage0/test-firefox-support.js stage0/test-deadline-model.js stage0/test-net-safety.js stage0/test-net.js stage0/test-orchestrator.js stage0/test-parse-host.js stage0/test-scaffold.js stage0/test-capture-bundle.js",
+    "check": "node build-manifest.js --target=chrome --check"
+  },
+  "devDependencies": {
+    "linkedom": "^0.18.0"
+  }
+}

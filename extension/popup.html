@@ -11,6 +11,35 @@
         <label for="completion-threshold">Complete above <input id="completion-threshold" type="number" min="0" max="100" step="1" value="95" />%</label>
         <label for="notification-lead-hours">Notify me <input id="notification-lead-hours" type="number" min="0" max="168" step="0.25" value="4" /> hours before due</label>
       </div>
+      <div class="auth-card" id="auth-card">
+        <div class="auth-row">
+          <div class="auth-info">
+            <p class="auth-title">Google Calendar</p>
+            <p id="auth-status" class="muted">Checking connection…</p>
+          </div>
+          <div class="auth-buttons">
+            <button id="auth-connect" class="primary">Connect</button>
+            <button id="auth-disconnect" class="secondary" hidden>Disconnect</button>
+          </div>
+        </div>
+        <p id="auth-error" class="muted error" hidden></p>
+        <details class="auth-details">
+          <summary>Having trouble connecting?</summary>
+          <p class="muted">If Google shows “redirect_uri_mismatch”, this install’s redirect URI isn’t registered on the OAuth client. Copy it and add it in Google Cloud Console (see <code>extension/google-calendar-setup.md</code>).</p>
+          <div class="auth-redirect-row">
+            <code id="auth-redirect"></code>
+            <button id="auth-copy-redirect" class="secondary">Copy</button>
+          </div>
+        </details>
+      </div>
+      <div class="sources-card" id="sources-card">
+        <div class="sources-head">
+          <p class="auth-title">Sources</p>
+          <button id="sync-now" class="secondary sync-now">Sync now</button>
+        </div>
+        <p id="sync-status" class="muted">Checking sources…</p>
+        <ul id="sources-list" class="sources-list"></ul>
+      </div>
       <button id="reset-data" class="secondary">Clear test data</button>
     </main>
     <script src="compat.js"></script>

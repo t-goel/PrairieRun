@@ -16,3 +16,31 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .settings-card input { accent-color: #fff; }
 .settings-card input[type="number"] { width: 52px; border: 0; border-radius: 4px; padding: 4px 5px; color: #17202a; font: inherit; text-align: center; }
 .settings-card input#completion-threshold { width: 48px; }
+.auth-card { margin: 14px 0; padding: 11px 12px; border: 1px solid #d7dee6; border-radius: 8px; background: #fff; }
+.auth-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.auth-info { min-width: 0; }
+.auth-title { margin: 0; font-size: 12px; font-weight: 700; }
+.auth-card .muted { margin: 2px 0 0; }
+.auth-buttons { display: grid; gap: 6px; flex-shrink: 0; }
+.auth-buttons button { width: auto; padding: 7px 12px; font-size: 12px; }
+.auth-details { margin-top: 8px; font-size: 11px; }
+.auth-details summary { cursor: pointer; color: #405263; }
+.auth-redirect-row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+.auth-redirect-row code { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 10px; color: #405263; }
+.auth-redirect-row button { width: auto; padding: 5px 10px; font-size: 11px; margin-top: 0; }
+.sources-card { margin: 14px 0; padding: 11px 12px; border: 1px solid #d7dee6; border-radius: 8px; background: #fff; }
+.sources-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.sources-head .auth-title { margin: 0; }
+button.sync-now { width: auto; padding: 7px 12px; font-size: 12px; margin-top: 0; }
+.sources-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.source-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.source-info { flex: 1; min-width: 0; display: grid; }
+.source-label { font-size: 12px; font-weight: 700; }
+.source-checked { font-size: 11px; color: #607080; }
+.chip { flex-shrink: 0; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px; background: #eef1f4; color: #405263; }
+.chip.ok { background: #e1f0e1; color: #206020; }
+.chip.signed-out { background: #fdecca; color: #8a5a00; }
+.chip.permission { background: #e3ecfd; color: #1a4fa0; }
+.chip.error { background: #fbe3e3; color: #a32929; }
+.chip.disabled, .chip.pending { background: #eef1f4; color: #607080; }
+button.source-action { width: 100%; padding: 6px 10px; font-size: 11px; margin-top: 0; }
