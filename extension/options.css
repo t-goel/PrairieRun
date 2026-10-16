@@ -1,0 +1,5 @@
+/* PrairieRun options styles (PR 1 minimal). */
+body { font-family: system-ui, sans-serif; margin: 24px; }
+main { max-width: 720px; }
+.muted { color: #666; }
+section { margin-bottom: 24px; }
