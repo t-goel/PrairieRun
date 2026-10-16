@@ -6,6 +6,7 @@
   let assignments = [];
   let settings = { showUndatedAssignments: false, assignmentView: "class" };
   let panel;
+  let authStatus = { connected: false };
 
   function escapeHtml(value) { return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;"); }
   function dueLabel(item) { return PrairieRunView.formatDueDate(item.dueAtLocal); }
@@ -71,6 +72,26 @@
 
   async function persist() { await PrairieRunExt.storageLocalSet({ [ASSIGNMENTS_KEY]: assignments }); render(); }
 
+  function renderAuthStatus() {
+    if (!panel) return;
+    const statusEl = panel.querySelector(".prr-auth-status");
+    const connectBtn = panel.querySelector("#prr-auth-connect");
+    const disconnectBtn = panel.querySelector("#prr-auth-disconnect");
+    const errorEl = panel.querySelector(".prr-auth-error");
+    if (!statusEl || !connectBtn || !disconnectBtn) return;
+    statusEl.textContent = authStatus.connected ? "Calendar: connected" : "Calendar: not connected";
+    connectBtn.hidden = authStatus.connected;
+    disconnectBtn.hidden = !authStatus.connected;
+    if (errorEl && !errorEl.dataset.pinned) errorEl.hidden = true;
+  }
+
+  function refreshAuthStatus() {
+    PrairieRunExt.runtimeSendMessage({ type: "PRAIRIERUN_AUTH_STATUS" }).then((response) => {
+      if (response?.ok) authStatus = response.status;
+      renderAuthStatus();
+    }).catch(() => undefined);
+  }
+
   async function editDueDate(id) {
     const item = assignments.find((entry) => entry.id === id); if (!item) return;
     const current = item.manuallyEnteredDueAt || item.dueAtLocal || "";
@@ -103,9 +124,28 @@
         <button type="button" class="prr-view-switch" id="prr-view-toggle" aria-label="Showing assignments by class"><span class="prr-view-switch__tab"></span><span class="prr-view-switch__label prr-view-switch__label--date">Due Date</span><span class="prr-view-switch__label prr-view-switch__label--class">By Class</span></button>
       </div>
     </div>
-    <ul class="list-group list-group-flush prr-list"></ul>`;
+    <ul class="list-group list-group-flush prr-list"></ul><div class="prr-auth"><span class="prr-auth-status text-muted">Calendar: checking…</span><span class="prr-auth-actions"><button type="button" class="btn btn-sm btn-outline-secondary" id="prr-auth-connect">Connect</button><button type="button" class="btn btn-sm btn-outline-secondary" id="prr-auth-disconnect" hidden>Disconnect</button></span></div><div class="prr-auth-error text-muted" hidden></div>`;
     built.querySelector("#prr-view-toggle").addEventListener("click", async () => { settings.assignmentView = settings.assignmentView === "ordered" ? "class" : "ordered"; await PrairieRunExt.storageLocalSet({ [SETTINGS_KEY]: settings }); render(); });
     built.querySelector("#prr-show-undated").addEventListener("click", async () => { settings.showUndatedAssignments = !settings.showUndatedAssignments; await PrairieRunExt.storageLocalSet({ [SETTINGS_KEY]: settings }); render(); });
+    built.querySelector("#prr-auth-connect").addEventListener("click", async () => {
+      const errorEl = built.querySelector(".prr-auth-error");
+      try {
+        const response = await PrairieRunExt.runtimeSendMessage({ type: "PRAIRIERUN_AUTH_CONNECT" });
+        if (!response?.ok) throw new Error(response?.error || "Google sign-in failed.");
+        authStatus = response.status;
+        if (errorEl) { errorEl.hidden = true; errorEl.dataset.pinned = ""; }
+      } catch (error) {
+        if (errorEl) { errorEl.textContent = error.message; errorEl.hidden = false; errorEl.dataset.pinned = "1"; }
+      }
+      renderAuthStatus();
+    });
+    built.querySelector("#prr-auth-disconnect").addEventListener("click", async () => {
+      try {
+        const response = await PrairieRunExt.runtimeSendMessage({ type: "PRAIRIERUN_AUTH_DISCONNECT" });
+        if (response?.ok) authStatus = response.status;
+      } catch (_error) { /* status refresh below shows the truth */ }
+      renderAuthStatus();
+    });
     return built;
   }
 
@@ -119,6 +159,8 @@
     if (anchor?.parentElement) anchor.insertAdjacentElement("afterend", panel);
     else container.append(panel);
     render();
+    renderAuthStatus();
+    refreshAuthStatus();
     return true;
   }
 
@@ -134,7 +176,7 @@
     });
   }
 
-  function update(nextAssignments) { assignments = nextAssignments || assignments; if (panel) render(); }
+  function update(nextAssignments) { assignments = nextAssignments || assignments; if (panel) { render(); refreshAuthStatus(); } }
 
   PrairieRunExt.addStorageChangedListener((changes, areaName) => {
     if (areaName !== "local") return;

@@ -63,6 +63,8 @@ submitting to AMO.
 
 ## Google Calendar export
 
-The extension is configured for the PrairieRun development OAuth client and requests Calendar access when the first actionable assignment is synchronized. On the first export, Chrome will ask the signed-in Google account for consent. Synchronization creates or reuses a `PrairieLearn — {class}` calendar and stores a private assignment marker plus Google event ID for duplicate-safe updates.
+The extension requests Calendar access via an explicit Connect step. Use the extension popup (or the Connect button in the PrairieRun panel) to connect or disconnect Google Calendar at any time. Disconnect revokes the token at `oauth2.googleapis.com/revoke` and clears the cached session token. Synchronization creates or reuses a `PrairieLearn — {class}` calendar and stores a private assignment marker plus Google event ID for duplicate-safe updates.
 
-For a different extension ID or a published build, create a matching Chrome Extension OAuth client and update `manifest.json` before loading the extension.
+Background runs never open a Google window: without a cached session token, automatic scans and the daily alarm record `auth_required` ("Connect Google Calendar to sync.") and wait for the user to Connect. Only the Connect button uses interactive auth.
+
+For a different extension ID or a published build, set the client ID once in `extension/oauth-config.js` (see `extension/google-calendar-setup.md`). Prefer sharing one stable extension ID via manifest `key` pinning so both developers use the same OAuth client. Firefox needs a separate OAuth client (different redirect origin); see `google-calendar-setup.md`. Issue #6 (Firefox client-ID settings UI) remains open.
