@@ -14,8 +14,18 @@
     "storage",
     "tabs",
     "identity",
-    "alarms"
+    "alarms",
+    "offscreen"
   ],
+  "optional_host_permissions": [
+    "https://canvas.illinois.edu/*",
+    "https://www.gradescope.com/*",
+    "https://us.prairietest.com/*"
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
   "host_permissions": [
     "https://us.prairielearn.com/*",
     "https://www.googleapis.com/*"

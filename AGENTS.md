@@ -6,6 +6,10 @@ PrairieRun is a Chrome/Brave extension that scans PrairieLearn course pages,
 stores normalized assignment data locally, and syncs eligible assignments to
 Google Calendar.
 
+The owner approved multi-site expansion: PrairieLearn, PrairieTest,
+Gradescope, and Canvas, plus a "Sync now" popup button. That approval
+overrides the "no manual scan button" rule below for the multi-source work.
+
 The current product surface is the embedded PrairieRun panel on the
 PrairieLearn home page plus the extension popup. The old standalone staging
 page has been removed.
@@ -28,8 +32,12 @@ Popup -> background.js
 calendar.js -> Google Calendar API
 ```
 
-`extension/background.js` imports `extension/calendar.js`; `calendar.js` is a
+`extension/background.js` imports `extension/oauth-config.js`,
+`extension/auth-utils.js`, then `extension/calendar.js`; `calendar.js` is a
 live dependency even though it is not loaded as a content script.
+`oauth-config.js` holds the one build-time Google OAuth client ID (one-line
+per-project change). `auth-utils.js` is the pure error-classification helper
+(shared by the extension and `stage0/test-auth-errors.js`).
 
 ## Cross-Browser Support (Chrome/Brave + Firefox 115+)
 
@@ -93,6 +101,26 @@ live dependency even though it is not loaded as a content script.
   class/calendar color.
 - Preserve duplicate prevention via stable PrairieRun identifiers in calendar
   event metadata/descriptions.
+- Google sign-in is per-user `launchWebAuthFlow` (implicit flow): the popup and
+  the home-panel footer offer Connect/Disconnect, status shows
+  `Not connected` / `Connected, expires <time>`, and Disconnect revokes at
+  `oauth2.googleapis.com/revoke` and clears the session token.
+- Tokens live only in `storage.session`/memory (via `PrairieRunExt`
+  get/set/remove session helpers); re-prompt only on expiry, revocation, or
+  Disconnect. On Calendar 401, clear the cached token once and retry with a
+  fresh token before failing.
+- `redirect_uri_mismatch` / `invalid_client` / cancellation each produce a
+  distinct human-readable message; the popup has a copy-redirect-URI affordance
+  for registering the install in the GCP OAuth client.
+- Background runs never open a Google window. `getCalendarToken()` defaults to
+  non-interactive; without a cached token it tries silent auth once and throws
+  `AuthRequiredError` on failure. Only the Connect button passes
+  `interactive:true` (via `PrairieRunCalendar.connect()`). Background Calendar
+  callers catch `AuthRequiredError` and set sync status
+  `{ state: "auth_required", source: "google", current: "Connect Google Calendar to sync." }`.
+- Full `calendar` scope is required for per-class calendar creation; Testing
+  mode is dev-only (test users, ~7-day grants) and Production + verification
+  is required before real users.
 - If a user deletes a mapped class calendar in Google Calendar, the next
   eligible synchronization must recreate or reuse the class calendar instead
   of failing on the stale local calendar ID.
@@ -161,7 +189,11 @@ live dependency even though it is not loaded as a content script.
 
 - `extension/background.js`: scanner, state manager, auto-sync coordinator.
 - `extension/calendar.js`: OAuth, calendar creation, duplicate markers, event
-  creation/update, calendar colors.
+  creation/update, calendar colors, token lifecycle (401 retry, revoke,
+  AuthRequiredError, no background interactive auth). Owned by PR 0, then PR 9.
+- `extension/oauth-config.js`: single build-time OAuth client ID (one-line
+  per-project change; never commit secrets/tokens).
+- `extension/auth-utils.js`: pure auth error classifier (`stage0/test-auth-errors.js` covers it).
 - `extension/compat.js`: cross-browser `PrairieRunExt` shim (namespace
   promises, session-token store). Loads first everywhere; all runtime code
   must go through it, never `chrome.*`/`browser.*` directly.
@@ -174,6 +206,51 @@ live dependency even though it is not loaded as a content script.
 - `extension/view-utils.js`: shared home-panel helpers; `statusLabel` is live.
 - `stage0/` and `capture-helper/`: development/testing assets. Do not delete
   them unless explicitly requested.
+
+## Multi-source scaffold (PR 1)
+
+PR 1 lays down the DeadlineItem model and module stubs so later PRs can work
+in parallel without touching shared files. No user-visible behavior change.
+
+- `extension/deadline-model.js` (`PrairieRunModel`): `SOURCE_IDS`, `STATUSES`,
+  `KINDS`, `makeDeadlineItem`, `localToUtc`, `formatCentral`,
+  `fromLegacyPlAssignment`, `toLegacyPlAssignment`, `fingerprint`.
+- `extension/source-registry.js` (`PrairieRunSources`): `register`, `get`,
+  `list`, `enabled`.
+- `extension/net.js` (`PrairieRunNet`): `fetchPage`, `assertSafeUrl`,
+  `SafetyError`. PR 1 covers `us.prairielearn.com`; PR 2 extends it.
+- `extension/parse-host.js` (`PrairieRunParseHost.parseHtml`): stub, PR 2 owns.
+- `extension/sync-orchestrator.js` (`PrairieRunOrchestrator.runSync`): stub
+  with the final contract, PR 2 owns. Not wired to any trigger yet.
+- `extension/source-prairielearn.js`: real wrapper mapping stored legacy PL
+  assignments via `fromLegacyPlAssignment`. PR 3 owns fetch.
+- `extension/source-canvas.js`, `source-gradescope.js`,
+  `extension/source-prairietest.js`: disabled stubs. Owners PR 4/5/6.
+- `extension/ics-parse.js` (`PrairieRunIcs`), `extension/ics-writer.js`
+  (`PrairieRunIcsWriter`), `extension/deadline-store.js`
+  (`PrairieRunDeadlineStore`), `extension/outputs.js` (`PrairieRunOutputs`),
+  `extension/relay-push.js`: stubs. Owners PR 4/7/8/9/11.
+- `extension/offscreen.html` / `extension/offscreen.js`: PR 2 owns.
+- `extension/options.html` + `options.js/css` + `options-canvas/courses/export/
+  output/relay.js`: "Coming soon" stubs. Later PRs own each section.
+- Background load order (`importScripts` + `FIREFOX_BACKGROUND_SCRIPTS`):
+  `compat.js`, `oauth-config.js`, `auth-utils.js`, `deadline-model.js`,
+  `source-registry.js`, `net.js`, `parse-host.js`, `prairielearn-adapter.js`,
+  `identity-resolver.js`, `source-prairielearn.js`, `source-canvas.js`,
+  `source-gradescope.js`, `source-prairietest.js`, `ics-parse.js`,
+  `ics-writer.js`, `deadline-store.js`, `outputs.js`, `relay-push.js`,
+  `calendar.js`, `sync-orchestrator.js`, `background.js` (Firefox only).
+  Do not edit these shared load lists in Wave-2 PRs; note changes in the PR
+  description instead.
+- Storage: `prairierunAssignments` stays authoritative for calendar/panel
+  until PR 9. `prairierunDeadlines` mirrors it after each scan.
+  `prairierunSourceStatus`, `prairierunSecrets`, `prairierunCourseLinks`,
+  `prairierunIcsSequences`, `prairierunSettings` (with
+  `sources:{prairielearn:{enabled:true},...}`, `syncIntervalMinutes:60`).
+- Timezone: store UTC, display America/Chicago.
+- Parallel-work docs: do not edit `AGENTS.md`/`systemdesign.md`/`ux.md` in
+  Wave-2 PRs. Write notes to `docs/notes/PR-<n>.md`; PR 10 folds them in.
+  Exceptions: PR 0, PR 1, PR 10 may edit the docs.
 
 The runtime adapter and `stage0/prairielearn-adapter.js` are duplicated parser
 implementations. Consolidating them is a future improvement, not a casual
