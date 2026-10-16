@@ -151,11 +151,12 @@ test("firefox manifest swaps in a scripts-array background and the gecko identit
     void _baseBackground;
     assert.deepEqual(rest, baseRest);
     // scripts array (not service_worker: Firefox only enables that on 121+)
-    // with the shim and calendar module ahead of the scanner.
-    assert.deepEqual(background, { scripts: ["compat.js", "calendar.js", "background.js"] });
+    // with the shim, OAuth config, auth helpers, and calendar module ahead
+    // of the scanner.
+    assert.deepEqual(background, { scripts: ["compat.js", "oauth-config.js", "auth-utils.js", "calendar.js", "background.js"] });
     assert.equal(browser_specific_settings.gecko.strict_min_version, "115.0");
     assert.match(browser_specific_settings.gecko.id, /@/);
-    for (const file of ["compat.js", "calendar.js", "background.js", "content.js", "home-panel.js", "popup.js"]) {
+    for (const file of ["compat.js", "oauth-config.js", "auth-utils.js", "calendar.js", "background.js", "content.js", "home-panel.js", "popup.js"]) {
       assert.ok(fs.existsSync(path.join(outDir, file)), `dist ships ${file}`);
     }
   } finally {

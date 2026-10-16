@@ -45,6 +45,12 @@ removed.
 - Calendar links, class-specific calendars, completion state, duplicate
   prevention, and the strict-greater-than-95% (not equal to 95%) completion rule
   must not regress.
+- Google Connect/Disconnect stays understandable: popup card plus a one-line
+  home-panel footer, `Not connected` / `Connected, expires <time>` status,
+  distinct cancellation vs. misconfiguration messages, and a collapsed
+  copy-redirect-URI troubleshooter. No client-ID settings field in the UI.
+  With no sign-in, background syncs show "Connect Google Calendar to sync."
+  instead of opening a window; only Connect uses interactive auth.
 - If an assignment was already completed before a late extension was added,
   the extension deadline is not shown or scheduled as new work.
 

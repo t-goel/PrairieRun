@@ -1,10 +1,18 @@
 (function () {
+if (!globalThis.PrairieRunOAuthConfig && typeof importScripts === "function") {
+  try { importScripts("oauth-config.js"); } catch (_configError) { /* tested without config */ }
+}
+if (!globalThis.PrairieRunAuthUtils && typeof importScripts === "function") {
+  try { importScripts("auth-utils.js"); } catch (_utilsError) { /* optional helper */ }
+}
 const CALENDAR_MAPPINGS_KEY = "prairierunCalendarMappings";
 const CALENDAR_SYNC_KEY = "prairierunCalendarSync";
 const CALENDAR_TOKEN_KEY = "prairierunCalendarToken";
 const CALENDAR_COLOR_KEY = "prairierunCalendarColors";
 const CALENDAR_GENERATIONS_KEY = "prairierunCalendarEventGenerations";
 const CALENDAR_API = "https://www.googleapis.com/calendar/v3";
+const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar";
+const REVOCATION_URL = "https://oauth2.googleapis.com/revoke";
 let writeQueue = Promise.resolve();
 
 function queueWrite(operation) {
@@ -24,6 +32,20 @@ async function stableEventId(assignmentId, generation = 0) {
 // extension settings storage to override it without code changes.
 const CHROME_OAUTH_CLIENT_ID = "284599557855-m80j0r9kf52uou6n232ekslrrrpmdc9r.apps.googleusercontent.com";
 
+class AuthRequiredError extends Error {
+  constructor(message = "Connect Google Calendar to sync.") {
+    super(message);
+    this.name = "AuthRequiredError";
+    this.code = "auth_required";
+  }
+}
+
+function getConfiguredClientId() {
+  const clientId = globalThis.PrairieRunOAuthConfig?.clientId;
+  if (typeof clientId === "string" && clientId && !/REPLACE/i.test(clientId)) return clientId;
+  return null;
+}
+
 async function getOAuthClientId() {
   const stored = await PrairieRunExt.storageLocalGet("prairierunSettings");
   const override = stored.prairierunSettings?.googleClientId;
@@ -31,39 +53,183 @@ async function getOAuthClientId() {
   if (PrairieRunExt.isFirefox) {
     throw new Error("Firefox needs its own Google OAuth client. Add your Firefox client ID as `googleClientId` in PrairieRun settings (see extension/google-calendar-setup.md).");
   }
+  const configured = getConfiguredClientId();
+  if (configured) return configured;
+  // oauth-config.js failed to load (e.g. unit tests): fall back to the
+  // baked-in Chrome development client so existing installs keep working.
+  // A placeholder REPLACE value is a misconfiguration and must surface.
+  if (typeof globalThis.PrairieRunOAuthConfig?.clientId === "string") {
+    throw new Error("The Google OAuth client ID is not configured. See extension/google-calendar-setup.md and set extension/oauth-config.js.");
+  }
   return CHROME_OAUTH_CLIENT_ID;
 }
 
-async function getCalendarToken() {
-  const cached = await PrairieRunExt.getSessionValue(CALENDAR_TOKEN_KEY);
-  if (cached?.accessToken && cached.expiresAt > Date.now() + 60_000) {
-    return cached.accessToken;
+function getClientIdSync() {
+  const configured = getConfiguredClientId();
+  return configured || CHROME_OAUTH_CLIENT_ID;
+}
+
+function getRedirectUri() {
+  try {
+    return PrairieRunExt.identityGetRedirectURL("oauth2");
+  } catch (_error) {
+    return "";
+  }
+}
+
+function authUtils() { return globalThis.PrairieRunAuthUtils || null; }
+
+function actionableAuthError(kind, redirectUri, fallbackMessage) {
+  const utils = authUtils();
+  const message = utils
+    ? utils.formatAuthError(kind, { redirectUri, message: fallbackMessage })
+    : (fallbackMessage || "Google sign-in failed.");
+  const error = new Error(message);
+  error.code = kind;
+  if (redirectUri) error.redirectUri = redirectUri;
+  return error;
+}
+
+function toActionableAuthError(error, redirectUri) {
+  const utils = authUtils();
+  const raw = String(error?.message || error || "");
+  const kind = utils ? utils.classifyAuthError(raw) : "other";
+  if (kind === "redirect_mismatch") return actionableAuthError("redirect_mismatch", redirectUri, raw);
+  if (kind === "invalid_client") return actionableAuthError("invalid_client", redirectUri, raw);
+  if (kind === "cancelled") return actionableAuthError("cancelled", redirectUri, raw);
+  if (kind === "unauthorized") return actionableAuthError("unauthorized", redirectUri, raw);
+  return error instanceof Error ? error : new Error(raw || "Google sign-in failed.");
+}
+
+async function clearCachedToken() {
+  try {
+    if (typeof PrairieRunExt.removeSessionValue === "function") {
+      await PrairieRunExt.removeSessionValue(CALENDAR_TOKEN_KEY);
+    } else {
+      await PrairieRunExt.clearSessionValues();
+    }
+  } catch (_error) { /* clearing is best-effort */ }
+}
+
+async function revokeToken(token) {
+  if (!token) return;
+  try {
+    await fetch(REVOCATION_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: `token=${encodeURIComponent(token)}`,
+    });
+  } catch (_error) { /* revocation is best-effort; clearing the cache is what signs out */ }
+}
+
+function parseAuthResult(responseUrl) {
+  const parsed = new URL(responseUrl);
+  const combined = new URLSearchParams(`${parsed.hash.slice(1)}&${parsed.search.slice(1)}`);
+  return combined;
+}
+
+async function getCalendarToken(options = {}) {
+  const wantInteractive = Boolean(options.interactive || options.forceInteractive);
+  if (!wantInteractive) {
+    const cached = await PrairieRunExt.getSessionValue(CALENDAR_TOKEN_KEY);
+    if (cached?.accessToken && cached.expiresAt > Date.now() + 60_000) {
+      return cached.accessToken;
+    }
   }
   const client_id = await getOAuthClientId();
-  const redirectUri = PrairieRunExt.identityGetRedirectURL("oauth2");
+  const redirectUri = getRedirectUri();
   const params = new URLSearchParams({
     client_id,
     response_type: "token",
     redirect_uri: redirectUri,
-    scope: "https://www.googleapis.com/auth/calendar",
+    scope: CALENDAR_SCOPE,
     include_granted_scopes: "true",
   });
   const url = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
   let responseUrl;
-  try {
-    responseUrl = await PrairieRunExt.identityLaunchWebAuthFlow({ url, interactive: false });
-  } catch (_silentError) {
-    responseUrl = await PrairieRunExt.identityLaunchWebAuthFlow({ url, interactive: true });
+  if (wantInteractive) {
+    try {
+      responseUrl = await PrairieRunExt.identityLaunchWebAuthFlow({ url, interactive: true });
+    } catch (error) {
+      throw toActionableAuthError(error, redirectUri);
+    }
+    if (!responseUrl) throw actionableAuthError("cancelled", redirectUri, "Google authorization was cancelled.");
+  } else {
+    // Unattended callers (daily alarm, automatic scans) must never open a
+    // Google window. Try silent auth only; on failure report auth_required
+    // so the popup can offer Connect.
+    try {
+      responseUrl = await PrairieRunExt.identityLaunchWebAuthFlow({ url, interactive: false });
+    } catch (_silentError) {
+      throw new AuthRequiredError();
+    }
+    if (!responseUrl) throw new AuthRequiredError();
   }
-  if (!responseUrl) throw new Error("Google authorization was cancelled.");
-  const fragment = new URL(responseUrl).hash.slice(1);
-  const result = new URLSearchParams(fragment);
-  if (result.get("error")) throw new Error(`Google authorization failed: ${result.get("error_description") || result.get("error")}`);
+  const result = parseAuthResult(responseUrl);
+  if (result.get("error")) {
+    const raw = `Google authorization failed: ${result.get("error_description") || result.get("error")}`;
+    if (!wantInteractive) {
+      const kind = authUtils()?.classifyAuthError(raw);
+      if (kind === "cancelled" || /interaction_required|user_interaction|authorization_required|consent_required/i.test(raw)) {
+        throw new AuthRequiredError();
+      }
+    }
+    throw toActionableAuthError(raw, redirectUri);
+  }
   const token = result.get("access_token");
-  if (!token) throw new Error("Google did not return an access token.");
+  if (!token) {
+    if (!wantInteractive) throw new AuthRequiredError();
+    throw new Error("Google did not return an access token.");
+  }
   const expiresIn = Number(result.get("expires_in")) || 3600;
   await PrairieRunExt.setSessionValue(CALENDAR_TOKEN_KEY, { accessToken: token, expiresAt: Date.now() + expiresIn * 1000 });
   return token;
+}
+
+async function getAuthStatus() {
+  let clientConfigured = true;
+  try { await getOAuthClientId(); } catch (_error) { clientConfigured = false; }
+  const entry = await PrairieRunExt.getSessionValue(CALENDAR_TOKEN_KEY);
+  const connected = Boolean(entry?.accessToken && entry.expiresAt > Date.now() + 60_000);
+  return {
+    connected,
+    clientConfigured,
+    expiresAt: entry?.expiresAt || null,
+    redirectUri: getRedirectUri(),
+  };
+}
+
+async function connectGoogleCalendar() {
+  await getCalendarToken({ interactive: true });
+  return getAuthStatus();
+}
+
+async function disconnectGoogleCalendar() {
+  const stored = await PrairieRunExt.getSessionValue(CALENDAR_TOKEN_KEY);
+  await revokeToken(stored?.accessToken);
+  await clearCachedToken();
+  return getAuthStatus();
+}
+
+function isUnauthorizedError(input) {
+  const utils = authUtils();
+  if (utils) return utils.classifyAuthError(input) === "unauthorized";
+  return String(input?.message || input || "").includes("(401)");
+}
+
+function maybeActionableCalendarError(error, redirectUri) {
+  const utils = authUtils();
+  if (!utils) return error instanceof Error ? error : new Error(String(error?.message || error));
+  const kind = utils.classifyAuthError(error);
+  if (kind === "redirect_mismatch" || kind === "invalid_client") {
+    return actionableAuthError(kind, redirectUri, String(error?.message || error));
+  }
+  return error instanceof Error ? error : new Error(String(error?.message || error));
+}
+
+function exportNeedsFreshTokenRetry(error, results) {
+  if (error && isUnauthorizedError(error)) return true;
+  return (results || []).some((result) => result.status === "failed" && isUnauthorizedError(result.reason));
 }
 
 async function calendarRequest(path, options = {}, token, attempt = 0) {
@@ -211,7 +377,24 @@ async function exportAssignments(assignments) {
   return queueWrite(() => exportAssignmentsNow(snapshot));
 }
 
-async function findParentCandidates(assignments) {
+async function withUnauthorizedRetry(operation) {
+  const redirectUri = getRedirectUri();
+  try {
+    return await operation();
+  } catch (error) {
+    if (error?.name === "AuthRequiredError") throw error;
+    if (!isUnauthorizedError(error)) throw maybeActionableCalendarError(error, redirectUri);
+    await clearCachedToken();
+    try {
+      return await operation();
+    } catch (retryError) {
+      if (retryError?.name === "AuthRequiredError") throw retryError;
+      throw maybeActionableCalendarError(retryError, redirectUri);
+    }
+  }
+}
+
+async function findParentCandidatesOnce(assignments) {
   const unresolved = assignments.filter((item) => item.instanceId && !item.assessmentId && item.dueAtLocal);
   if (!unresolved.length) return [];
   const token = await getCalendarToken();
@@ -247,6 +430,11 @@ async function findParentCandidates(assignments) {
   return [...candidates.values()];
 }
 
+async function findParentCandidates(assignments) {
+  const snapshot = structuredClone(assignments);
+  return queueWrite(() => withUnauthorizedRetry(() => findParentCandidatesOnce(snapshot)));
+}
+
 async function insertOrRecoverEvent(assignment, calendarId, resource, token, generations) {
   const generationKey = `${calendarId}|${assignment.id}`;
   let generation = generations[generationKey] || 0;
@@ -279,7 +467,7 @@ async function insertOrRecoverEvent(assignment, calendarId, resource, token, gen
   throw new Error("Could not restore the Calendar event after multiple deleted IDs; refresh to retry.");
 }
 
-async function inspectAssignmentEvents(assignments) {
+async function inspectAssignmentEventsOnce(assignments) {
   const dated = assignments.filter((item) => item.dueAtLocal && item.syncState !== "stale");
   if (!dated.length) return { missingIds: [], duplicateIds: [] };
   const token = await getCalendarToken();
@@ -302,8 +490,12 @@ async function inspectAssignmentEvents(assignments) {
   return { missingIds, duplicateIds };
 }
 
-async function exportAssignmentsNow(assignments) {
-  if (!assignments.length) throw new Error("No assignments with due dates are ready to sync.");
+async function inspectAssignmentEvents(assignments) {
+  const snapshot = structuredClone(assignments);
+  return queueWrite(() => withUnauthorizedRetry(() => inspectAssignmentEventsOnce(snapshot)));
+}
+
+async function runExportOnce(assignments) {
   const token = await getCalendarToken();
   const calendars = await listWritableCalendars(token);
   const stored = await PrairieRunExt.storageLocalGet([CALENDAR_MAPPINGS_KEY, CALENDAR_SYNC_KEY, CALENDAR_GENERATIONS_KEY, "prairierunSettings"]);
@@ -367,12 +559,30 @@ async function exportAssignmentsNow(assignments) {
   return results;
 }
 
-async function removeAssignmentEvent(assignment) {
-  const snapshot = structuredClone(assignment);
-  return queueWrite(() => removeAssignmentEventNow(snapshot));
+async function exportAssignmentsNow(assignments) {
+  if (!assignments.length) throw new Error("No assignments with due dates are ready to sync.");
+  const redirectUri = getRedirectUri();
+  try {
+    const results = await runExportOnce(assignments);
+    if (exportNeedsFreshTokenRetry(null, results)) {
+      await clearCachedToken();
+      return await runExportOnce(assignments);
+    }
+    return results;
+  } catch (error) {
+    if (error?.name === "AuthRequiredError") throw error;
+    if (!isUnauthorizedError(error)) throw maybeActionableCalendarError(error, redirectUri);
+    await clearCachedToken();
+    try {
+      return await runExportOnce(assignments);
+    } catch (retryError) {
+      if (retryError?.name === "AuthRequiredError") throw retryError;
+      throw maybeActionableCalendarError(retryError, redirectUri);
+    }
+  }
 }
 
-async function removeAssignmentEventNow(assignment) {
+async function removeAssignmentEventOnce(assignment) {
   const stored = await PrairieRunExt.storageLocalGet([CALENDAR_MAPPINGS_KEY, CALENDAR_SYNC_KEY]);
   const sync = stored[CALENDAR_SYNC_KEY] || {};
   const mapping = sync[assignment.id];
@@ -385,8 +595,27 @@ async function removeAssignmentEventNow(assignment) {
   return { status: events.length ? "removed" : "skipped", assignment, eventId: events[0]?.id };
 }
 
+async function removeAssignmentEventNow(assignment) {
+  return withUnauthorizedRetry(() => removeAssignmentEventOnce(assignment));
+}
+
+async function removeAssignmentEvent(assignment) {
+  const snapshot = structuredClone(assignment);
+  return queueWrite(() => removeAssignmentEventNow(snapshot));
+}
+
 globalThis.PrairieRunCalendar = { exportAssignments, removeAssignmentEvent,
-  findParentCandidates: (assignments) => queueWrite(() => findParentCandidates(structuredClone(assignments))),
-  inspectAssignmentEvents: (assignments) => queueWrite(() => inspectAssignmentEvents(structuredClone(assignments))),
+  findParentCandidates,
+  inspectAssignmentEvents,
+  exportAssignmentsNow,
+  getCalendarToken,
+  getAuthStatus,
+  connectGoogleCalendar,
+  connect: connectGoogleCalendar,
+  disconnectGoogleCalendar,
+  getRedirectUri,
+  getOAuthClientId,
+  getClientId: getClientIdSync,
+  AuthRequiredError,
 };
 })();
