@@ -129,6 +129,11 @@
     tabsQuery: (query) => callAsync(ext.tabs, "query", query),
     tabsGet: (tabId) => callAsync(ext.tabs, "get", tabId),
     tabsSendMessage: (tabId, message) => callAsync(ext.tabs, "sendMessage", tabId, message),
+    // Optional host permissions (e.g. Canvas) are requested from a user click.
+    // Rejects when the permissions API is unavailable, so callers can treat
+    // that as "not granted".
+    permissionsRequest: (origins) => callAsync(ext.permissions, "request", { origins }),
+    permissionsContains: (origins) => callAsync(ext.permissions, "contains", { origins }),
     runtimeSendMessage: (message) => callAsync(ext.runtime, "sendMessage", message),
     identityGetRedirectURL: (path) => ext.identity.getRedirectURL(path),
     identityLaunchWebAuthFlow: (details) => callAsync(ext.identity, "launchWebAuthFlow", details),
