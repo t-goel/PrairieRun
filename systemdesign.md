@@ -90,6 +90,23 @@ Popup ──> background.js
 calendar.js ──> Google Calendar API
 ```
 
+## Multi-source scaffold (PR 1, no behavior change)
+
+PR 1 adds the `DeadlineItem` normalized model (`extension/deadline-model.js`,
+global `PrairieRunModel`) and the source registry
+(`extension/source-registry.js`, global `PrairieRunSources`) plus stubs for
+every later module, so Wave-2 agents can work in parallel on owned files only.
+`background.js` still scans PrairieLearn tabs and `saveScanResult` still owns
+`prairierunAssignments`; it additionally mirrors `prairierunDeadlines` via
+`fromLegacyPlAssignment`. `calendar.js` and `home-panel.js` still read the
+legacy key until PR 9. `sync-orchestrator.js` (`PrairieRunOrchestrator.runSync`)
+is present but not wired to any trigger. New edge surfaces are
+`offscreen.html`/`offscreen.js` (PR 2 parsing host) and `options.html` with
+per-section stub scripts. Manifest `options_ui` points at `options.html`;
+Chrome keeps the `offscreen` permission and `optional_host_permissions` for
+Canvas/Gradescope/PrairieTest while Firefox drops `offscreen` and merges the
+optional hosts into `host_permissions`. Per-PR notes live in `docs/notes/`.
+
 The manifest loads the content scripts on PrairieLearn and loads
 `background.js` as the service worker. `background.js` imports `calendar.js`, so
 the calendar module is a live dependency even though it is not listed in the
