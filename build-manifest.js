@@ -12,7 +12,7 @@
 // than `service_worker`, which Firefox only enables on 121+) keeps the
 // extension working on pre-121 Firefox, including 115 ESR; background.js
 // only calls `importScripts` when it exists, and the manifest lists
-// compat.js and calendar.js first so the guard is a no-op there.
+// compat.js, oauth-config.js, auth-utils.js, and calendar.js first so the guard is a no-op there.
 const fs = require("fs");
 const path = require("path");
 
@@ -23,9 +23,10 @@ const DEFAULT_GECKO_ID = "prairierun@example.com";
 // storage.session (with in-memory fallback in compat.js) needs Firefox 115+;
 // the scripts-array background below works back to well before that.
 const FIREFOX_MIN_VERSION = "115.0";
-// Background page load order: the compat shim first, then the calendar
-// module that depends on it, then the scanner that depends on both.
-const FIREFOX_BACKGROUND_SCRIPTS = ["compat.js", "calendar.js", "background.js"];
+// Background page load order: the compat shim first, then OAuth config and
+// auth helpers, then the calendar module that depends on them, then the
+// scanner that depends on all of them.
+const FIREFOX_BACKGROUND_SCRIPTS = ["compat.js", "oauth-config.js", "auth-utils.js", "calendar.js", "background.js"];
 
 function parseArgs(argv) {
   const args = { target: null, out: "dist-firefox", geckoId: DEFAULT_GECKO_ID, check: false };

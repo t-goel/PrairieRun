@@ -83,15 +83,36 @@ PrairieLearn page
 Popup ──> background.js
              ├─ scans course assessment tabs
              ├─ stores normalized assignment state
-             ├─ invokes calendar.js
+             ├─ invokes calendar.js (via oauth-config.js + auth-utils.js)
+             ├─ owns Google Connect/Disconnect/status (PRAIRIERUN_AUTH_*)
              ├─ schedules 24-hour Calendar reconciliation
              └─ notifies the home panel
 
 calendar.js ──> Google Calendar API
 ```
 
+The popup and the home-panel footer are thin auth clients: they send
+`PRAIRIERUN_AUTH_STATUS` / `PRAIRIERUN_AUTH_CONNECT` /
+`PRAIRIERUN_AUTH_DISCONNECT` to the background worker, which delegates to
+`calendar.js`. Tokens live only in `storage.session` (via `PrairieRunExt`
+session helpers, never `storage.local`). On Calendar 401 the cached token is
+cleared once and the export retried with a fresh token.
+`auth-utils.js` classifies `redirect_uri_mismatch` / `invalid_client` /
+cancelled / expired distinctly (unit-tested in `stage0/test-auth-errors.js`).
+
+Background runs never open a Google window. `getCalendarToken()` defaults to
+`{ interactive: false }`: without a cached token it tries silent auth once
+and throws `AuthRequiredError` (exported on `PrairieRunCalendar`) on failure.
+Only the Connect button passes `interactive:true` (via
+`PrairieRunCalendar.connect()`). Background Calendar callers
+(`notifyHomeTab`, `resyncStoredAssignments`, `PRAIRIERUN_ASSIGNMENT_UPDATED`)
+catch `AuthRequiredError` and set sync status `{ state: "auth_required",
+source: "google", current: "Connect Google Calendar to sync." }` instead of a
+per-assignment failure. The popup renders that state with a Connect button.
+
 The manifest loads the content scripts on PrairieLearn and loads
-`background.js` as the service worker. `background.js` imports `calendar.js`, so
+`background.js` as the service worker. `background.js` imports
+`oauth-config.js`, `auth-utils.js`, then `calendar.js`, so
 the calendar module is a live dependency even though it is not listed in the
 manifest's content-script array.
 
@@ -115,7 +136,7 @@ shared source of truth and `build-manifest.js` (repo root) generates each
 target: `--target=chrome` regenerates `extension/manifest.json` (single-file
 `service_worker` background), and `--target=firefox` emits a `dist-firefox/`
 directory whose manifest swaps in a `scripts`-array background (`compat.js`,
-`calendar.js`, `background.js` in order) and adds
+`oauth-config.js`, `auth-utils.js`, `calendar.js`, `background.js` in order) and adds
 `browser_specific_settings.gecko` (stable add-on ID plus
 `strict_min_version: "115.0"`). The scripts array is required because
 Firefox only enables `service_worker` on 121+; the `typeof importScripts ===
