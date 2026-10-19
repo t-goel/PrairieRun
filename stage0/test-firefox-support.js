@@ -174,3 +174,19 @@ test("firefox manifest swaps in a scripts-array background and the gecko identit
     fs.rmSync(outDir, { recursive: true, force: true });
   }
 });
+
+test("dashboard suppresses unconfigured Firefox Google OAuth client notices from status line", () => {
+  const { isSuppressedSyncMessage, friendlySyncMessage } = require("../extension/options-dashboard.js");
+  const firefoxNotice = "Firefox needs its own Google OAuth client. Add your Firefox client ID as `googleClientId` in PrairieRun settings (see extension/google-calendar-setup.md).";
+  const wrappedNotice = "Could not check Google Calendar: Firefox needs its own Google OAuth client. Add your Firefox client ID as `googleClientId` in PrairieRun settings (see extension/google-calendar-setup.md).";
+  const directSyncNotice = "Google direct sync needs the Firefox client ID. This is optional — the Calendar feed card works without it.";
+
+  assert.equal(isSuppressedSyncMessage(firefoxNotice), true);
+  assert.equal(isSuppressedSyncMessage(wrappedNotice), true);
+  assert.equal(isSuppressedSyncMessage(directSyncNotice), true);
+  assert.equal(friendlySyncMessage(directSyncNotice), "");
+
+  assert.equal(isSuppressedSyncMessage("Scanning…"), false);
+  assert.equal(isSuppressedSyncMessage("Synchronizing Google Calendar…"), false);
+  assert.equal(isSuppressedSyncMessage("Sync failed."), false);
+});

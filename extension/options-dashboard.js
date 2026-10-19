@@ -2,18 +2,18 @@
 // (settings, Google Calendar auth, source status, Sync now). Lives on the
 // same message contract as the removed popup (PRAIRIERUN_GET_STATE /
 // PRAIRIERUN_AUTH_* / PRAIRIERUN_SYNC_NOW).
-const notificationLeadElement = document.querySelector("#notification-lead-hours");
-const completionThresholdElement = document.querySelector("#completion-threshold");
-const resetDataButton = document.querySelector("#reset-data");
-const authStatusElement = document.querySelector("#auth-status");
-const authConnectButton = document.querySelector("#auth-connect");
-const authDisconnectButton = document.querySelector("#auth-disconnect");
-const authErrorElement = document.querySelector("#auth-error");
-const authRedirectElement = document.querySelector("#auth-redirect");
-const authCopyButton = document.querySelector("#auth-copy-redirect");
-const sourcesListElement = document.querySelector("#sources-list");
-const syncNowButton = document.querySelector("#sync-now");
-const syncStatusElement = document.querySelector("#sync-status");
+const notificationLeadElement = typeof document !== "undefined" ? document.querySelector("#notification-lead-hours") : null;
+const completionThresholdElement = typeof document !== "undefined" ? document.querySelector("#completion-threshold") : null;
+const resetDataButton = typeof document !== "undefined" ? document.querySelector("#reset-data") : null;
+const authStatusElement = typeof document !== "undefined" ? document.querySelector("#auth-status") : null;
+const authConnectButton = typeof document !== "undefined" ? document.querySelector("#auth-connect") : null;
+const authDisconnectButton = typeof document !== "undefined" ? document.querySelector("#auth-disconnect") : null;
+const authErrorElement = typeof document !== "undefined" ? document.querySelector("#auth-error") : null;
+const authRedirectElement = typeof document !== "undefined" ? document.querySelector("#auth-redirect") : null;
+const authCopyButton = typeof document !== "undefined" ? document.querySelector("#auth-copy-redirect") : null;
+const sourcesListElement = typeof document !== "undefined" ? document.querySelector("#sources-list") : null;
+const syncNowButton = typeof document !== "undefined" ? document.querySelector("#sync-now") : null;
+const syncStatusElement = typeof document !== "undefined" ? document.querySelector("#sync-status") : null;
 let authRedirectUri = "";
 let settings = { notificationLeadMinutes: 240, completionThreshold: 95 };
 let cachedSources = [];
@@ -24,15 +24,18 @@ let cachedSourceStatus = {};
 function showStatus(text, error = false) {
   showSyncStatus(text, error);
 }
-// Firefox-only OAuth-client failures read too technical for the main status
-// line, so simplify them and point at the no-setup Calendar feed path.
+// Direct Google sync is optional (the Calendar feed card works without it).
+// Firefox-only OAuth-client errors and setup notices are suppressed from the
+// main Sources card status line.
+function isSuppressedSyncMessage(text) {
+  return /googleClientId|Firefox needs its own Google OAuth client|Google direct sync needs the Firefox client ID/i.test(text || "");
+}
 function friendlySyncMessage(text) {
-  if (/googleClientId|Firefox needs its own Google OAuth client/.test(text || "")) {
-    return "Google direct sync needs the Firefox client ID. This is optional — the Calendar feed card works without it.";
-  }
-  return text;
+  if (isSuppressedSyncMessage(text)) return "";
+  return text || "";
 }
 function showSyncStatus(text, error = false) {
+  if (!syncStatusElement) return;
   syncStatusElement.hidden = !text;
   syncStatusElement.textContent = text;
   syncStatusElement.classList.toggle("error", error);
@@ -40,8 +43,8 @@ function showSyncStatus(text, error = false) {
 function applySettings(nextSettings = {}) {
   settings = { ...settings, ...nextSettings };
   const minutes = Number(settings.notificationLeadMinutes);
-  notificationLeadElement.value = Number.isFinite(minutes) ? String(minutes / 60) : "4";
-  completionThresholdElement.value = Number.isFinite(Number(settings.completionThreshold)) ? String(settings.completionThreshold) : "95";
+  if (notificationLeadElement) notificationLeadElement.value = Number.isFinite(minutes) ? String(minutes / 60) : "4";
+  if (completionThresholdElement) completionThresholdElement.value = Number.isFinite(Number(settings.completionThreshold)) ? String(settings.completionThreshold) : "95";
 }
 function saveSettings() {
   delete settings.timezone;
@@ -60,11 +63,20 @@ function refreshState() {
     cachedSources = Array.isArray(response.sources) ? response.sources : [];
     cachedSourceStatus = response.sourceStatus || {};
     renderSources();
-    if (response.sync?.state === "scanning") showStatus(`${response.sync.current || "Scanning…"} (${response.sync.found || 0} found)`);
-    else if (response.sync?.state === "syncing") showStatus(friendlySyncMessage(response.sync.current) || "Synchronizing Google Calendar…");
-    else if (response.sync?.state === "auth_required") showStatus(friendlySyncMessage(response.sync.current) || "Connect Google Calendar to sync.", true);
-    else if (response.sync?.state === "error") showStatus(friendlySyncMessage(response.sync.current) || "Sync failed.", true);
-    else showStatus("");
+    const raw = response.sync?.current || "";
+    if (isSuppressedSyncMessage(raw)) {
+      showStatus("");
+    } else if (response.sync?.state === "scanning") {
+      showStatus(`${raw || "Scanning…"} (${response.sync.found || 0} found)`);
+    } else if (response.sync?.state === "syncing") {
+      showStatus(raw || "Synchronizing Google Calendar…");
+    } else if (response.sync?.state === "auth_required") {
+      showStatus(raw || "Connect Google Calendar to sync.", true);
+    } else if (response.sync?.state === "error") {
+      showStatus(raw || "Sync failed.", true);
+    } else {
+      showStatus("");
+    }
   }).catch((error) => showStatus(error.message, true));
 }
 function refreshAuthStatus() {
@@ -304,51 +316,61 @@ function monitorRefresh(attempt = 0) {
   if (attempt < 120) setTimeout(() => monitorRefresh(attempt + 1), 500);
 }
 
-refreshState();
-refreshAuthStatus();
-
-PrairieRunExt.addStorageChangedListener((changes, areaName) => {
-  if (areaName === "local" && changes.prairierunSyncStatus) {
-    refreshState();
-    refreshAuthStatus();
-  }
-  if (areaName === "local" && changes.prairierunSourceStatus) {
-    refreshState();
-  }
-});
-
-notificationLeadElement.addEventListener("change", async () => {
-  const hours = Number(notificationLeadElement.value);
-  if (!Number.isFinite(hours) || hours < 0 || hours > 168) {
-    notificationLeadElement.value = String(settings.notificationLeadMinutes / 60);
-    return;
-  }
-  settings.notificationLeadMinutes = Math.round(hours * 60);
-  await saveSettings();
-});
-
-completionThresholdElement.addEventListener("change", async () => {
-  const threshold = Number(completionThresholdElement.value);
-  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 100) {
-    completionThresholdElement.value = String(settings.completionThreshold);
-    return;
-  }
-  settings.completionThreshold = Math.round(threshold);
-  await saveSettings();
-  showStatus("Refreshing assignments…");
-  monitorRefresh();
-});
-
-resetDataButton.addEventListener("click", async () => {
-  if (!confirm("Clear PrairieRun assignments, sync state, calendar mappings, settings, and cached authorization?")) return;
-  resetDataButton.disabled = true;
-  await PrairieRunExt.storageLocalClear();
-  await PrairieRunExt.clearSessionValues();
-  resetDataButton.disabled = false;
-  applySettings({ notificationLeadMinutes: 240, completionThreshold: 95 });
-  showStatus("Test data cleared. Refresh PrairieLearn to scan again.");
+if (typeof document !== "undefined") {
+  refreshState();
   refreshAuthStatus();
-});
+}
+
+if (typeof PrairieRunExt !== "undefined" && typeof PrairieRunExt.addStorageChangedListener === "function") {
+  PrairieRunExt.addStorageChangedListener((changes, areaName) => {
+    if (areaName === "local" && changes.prairierunSyncStatus) {
+      refreshState();
+      refreshAuthStatus();
+    }
+    if (areaName === "local" && changes.prairierunSourceStatus) {
+      refreshState();
+    }
+  });
+}
+
+if (notificationLeadElement) {
+  notificationLeadElement.addEventListener("change", async () => {
+    const hours = Number(notificationLeadElement.value);
+    if (!Number.isFinite(hours) || hours < 0 || hours > 168) {
+      notificationLeadElement.value = String(settings.notificationLeadMinutes / 60);
+      return;
+    }
+    settings.notificationLeadMinutes = Math.round(hours * 60);
+    await saveSettings();
+  });
+}
+
+if (completionThresholdElement) {
+  completionThresholdElement.addEventListener("change", async () => {
+    const threshold = Number(completionThresholdElement.value);
+    if (!Number.isFinite(threshold) || threshold < 0 || threshold > 100) {
+      completionThresholdElement.value = String(settings.completionThreshold);
+      return;
+    }
+    settings.completionThreshold = Math.round(threshold);
+    await saveSettings();
+    showStatus("Refreshing assignments…");
+    monitorRefresh();
+  });
+}
+
+if (resetDataButton) {
+  resetDataButton.addEventListener("click", async () => {
+    if (!confirm("Clear PrairieRun assignments, sync state, calendar mappings, settings, and cached authorization?")) return;
+    resetDataButton.disabled = true;
+    await PrairieRunExt.storageLocalClear();
+    await PrairieRunExt.clearSessionValues();
+    resetDataButton.disabled = false;
+    applySettings({ notificationLeadMinutes: 240, completionThreshold: 95 });
+    showStatus("Test data cleared. Refresh PrairieLearn to scan again.");
+    refreshAuthStatus();
+  });
+}
 
 if (authConnectButton) authConnectButton.addEventListener("click", () => {
   authConnectButton.disabled = true;
@@ -394,3 +416,7 @@ if (authCopyButton) authCopyButton.addEventListener("click", async () => {
   }
   setTimeout(() => { authCopyButton.textContent = "Copy"; }, 1500);
 });
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = { isSuppressedSyncMessage, friendlySyncMessage };
+}
