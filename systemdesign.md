@@ -125,10 +125,15 @@ not re-uploaded), `relay-push.js` POSTs the full ICS built by
 `PrairieRunIcsWriter` (sharing `prairierunIcsSequences` with manual exports
 for stable UIDs) to `<relayUrl>/api/publish` and stores the returned stable
 Blob URL. The bundled `relay/` directory is the Vercel scaffold for that
-relay (`api/publish.js`, key-gated, permissive CORS so the options page can
-publish directly without a host permission; background auto-publish uses the
-granted origin). Users subscribe to the URL in any calendar app, which keeps
-due dates current with no Google OAuth involvement.
+relay: `api/claim.js` mints a per-install `feedId` plus an HMAC-SHA256 key
+derived from the env-only `PUBLISH_KEY` (so clients never see the master
+secret and a minted key only opens its own feed), and `api/publish.js`
+accepts the master key or that per-feed key; key-gated, permissive CORS so
+the options page can publish directly without a host permission (background
+auto-publish uses the granted origin). The dashboard's one-click "Get my feed
+URL" uses the claim endpoint against `PrairieRunRelay.DEFAULT_RELAY_URL`
+unless a custom relay is configured. Users subscribe to the URL in any
+calendar app, which keeps due dates current with no Google OAuth involvement.
 
 ## Multi-source scaffold (PR 1, no behavior change)
 

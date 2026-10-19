@@ -57,3 +57,7 @@
 - Manual still needed: reload unpacked in Chrome/Brave, enable Canvas +
   Gradescope, confirm the course link in Options → Course links, check the
   panel shows each assignment once; same pass in Firefox via `about:debugging`.
+
+## Addendum (2026-10-19): course-family dedupe rework
+
+normalizeCourseCode now strips all whitespace/punctuation and case (CS 498, cs-498, CS498 -> CS498) and extracts the core code/section. Course keys cluster into families via union-find: prefix plus a known section suffix (DK2, DK, D2, ONL, ON, X, A, B, C, AD1, AL1, extensible list) or a 2+ char tail with a letter; digit-only tails and continuations of the course-number digit run are rejected. suggestCourseLinks folds families into one bucket keyed by the shortest normalized key; dedupe merges/near-misses on relatedTitles (equal normalized titles or 2+ char prefix tails), preserving the 5-minute window and deltaMinutes semantics. Manual .ics export UI and the Output/Relay stubs were removed per owner decision; the feed (see PR notes) supersedes them.

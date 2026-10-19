@@ -20,11 +20,39 @@
     });
   }
 
+  // Stored links may use the legacy spaced key format ("CS 425"); re-key them
+  // through the current normalizer so old rows merge with suggested family
+  // buckets and the confirmed checkbox carries over.
+  function migrateStoredLinks(rawLinks) {
+    const store = globalThis.PrairieRunDeadlineStore;
+    if (!rawLinks || typeof rawLinks !== "object") return {};
+    const normalize = store && typeof store.normalizeCourseCode === "function";
+    const migrated = {};
+    for (const [key, entry] of Object.entries(rawLinks)) {
+      const normalized = normalize ? store.normalizeCourseCode(key) : key;
+      if (!normalized) continue;
+      const target = migrated[normalized];
+      if (!target) {
+        migrated[normalized] = entry;
+        continue;
+      }
+      const merged = { ...target };
+      for (const [source, keys] of Object.entries(entry)) {
+        if (Array.isArray(keys)) {
+          merged[source] = [...new Set([...(Array.isArray(target[source]) ? target[source] : []), ...keys])];
+        }
+      }
+      merged.confirmed = target.confirmed === true || entry.confirmed === true;
+      migrated[normalized] = merged;
+    }
+    return migrated;
+  }
+
   async function loadData() {
     const stored = await globalThis.PrairieRunExt.storageLocalGet([DEADLINES_KEY, LINKS_KEY]);
     return {
       items: Array.isArray(stored[DEADLINES_KEY]) ? stored[DEADLINES_KEY] : [],
-      links: stored[LINKS_KEY] && typeof stored[LINKS_KEY] === "object" ? stored[LINKS_KEY] : {},
+      links: migrateStoredLinks(stored[LINKS_KEY] && typeof stored[LINKS_KEY] === "object" ? stored[LINKS_KEY] : {}),
     };
   }
 

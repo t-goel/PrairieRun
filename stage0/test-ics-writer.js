@@ -11,8 +11,6 @@ globalThis.PrairieRunModel = PrairieRunModel;
 const icsWriter = require("../extension/ics-writer.js");
 const { buildCalendar, escapeText, foldLine, formatUtc, filterWindow } = icsWriter;
 
-const optionsExport = require("../extension/options-export.js");
-
 const FIXED_NOW = new Date("2026-09-01T12:00:00.000Z");
 
 const FOUR_ITEMS = [
@@ -257,165 +255,27 @@ test("filterWindow filters items outside next N days", () => {
   assert.equal(filtered14[1].id, "2");
 });
 
-test("options-export downloadIcs persists sequences and builds calendar", async () => {
-  let savedStorage = {};
-  globalThis.PrairieRunExt = {
-    storageLocalGet: async (keys) => {
-      const out = {};
-      for (const k of Array.isArray(keys) ? keys : [keys]) {
-        out[k] = savedStorage[k];
-      }
-      return out;
-    },
-    storageLocalSet: async (items) => {
-      Object.assign(savedStorage, items);
-    },
-  };
+// Re-expresses the former manual .ics download persistence test: the
+// stored output settings merge into writer options, and the returned sequences
+// object is what callers persist back under prairierunIcsSequences.
+test("buildCalendar merges stored output settings into triggers and returns sequences for persistence", () => {
+  const outputSettings = { eventShape: "block1h", leadMinutes: 120 };
+  const { text, sequences } = buildCalendar(FOUR_ITEMS, {
+    name: "PrairieRun",
+    now: FIXED_NOW,
+    sequences: {},
+    eventShape: outputSettings.eventShape || "block1h",
+    leadMinutes: outputSettings.leadMinutes !== undefined ? outputSettings.leadMinutes : 240,
+    nightBefore: Boolean(outputSettings.nightBefore),
+    nightBeforeHour: outputSettings.nightBeforeHour != null ? outputSettings.nightBeforeHour : 20,
+    includeCompleted: outputSettings.includeCompleted !== false,
+    windowDays: outputSettings.windowDays ?? null,
+  });
 
-  savedStorage = {
-    prairierunSettings: {
-      output: {
-        eventShape: "block1h",
-        leadMinutes: 120,
-      },
-    },
-    prairierunIcsSequences: {},
-  };
-
-  const result = await optionsExport.downloadIcs(FOUR_ITEMS, "prairierun-test.ics");
-  assert.ok(result.text.includes("BEGIN:VCALENDAR"));
-  assert.ok(result.text.includes("TRIGGER:-PT120M"));
-  assert.ok(savedStorage.prairierunIcsSequences[FOUR_ITEMS[0].id]);
-  assert.equal(savedStorage.prairierunIcsSequences[FOUR_ITEMS[0].id].n, 0);
-});
-
-test("options-export render creates export buttons and removes coming soon note", async () => {
-  function makeElement(tagName) {
-    const children = [];
-    const listeners = {};
-    const elem = {
-      tagName: tagName.toUpperCase(),
-      dataset: {},
-      style: {},
-      children,
-      textContent: "",
-      className: "",
-      id: "",
-      type: "",
-      disabled: false,
-      appendChild(child) {
-        children.push(child);
-        return child;
-      },
-      addEventListener(event, fn) {
-        listeners[event] = fn;
-      },
-      querySelector(sel) {
-        if (sel.startsWith("#")) {
-          const id = sel.slice(1);
-          if (this.id === id) return this;
-          for (const c of children) {
-            const res = c.querySelector?.(sel);
-            if (res) return res;
-          }
-        }
-        if (sel.startsWith(".")) {
-          const cls = sel.slice(1);
-          if (this.className?.includes(cls)) return this;
-          for (const c of children) {
-            const res = c.querySelector?.(sel);
-            if (res) return res;
-          }
-        }
-        if (sel.startsWith("[data-")) {
-          const key = sel.slice(6, -1);
-          if (this.dataset && this.dataset[key] !== undefined) return this;
-          for (const c of children) {
-            const res = c.querySelector?.(sel);
-            if (res) return res;
-          }
-        }
-        return null;
-      },
-      querySelectorAll(sel) {
-        const out = [];
-        if (sel === "p.muted" && this.tagName === "P" && this.className === "muted") {
-          out.push(this);
-        }
-        for (const c of children) {
-          if (c.querySelectorAll) out.push(...c.querySelectorAll(sel));
-        }
-        return out;
-      },
-      remove() {
-        if (elem.parent) {
-          const idx = elem.parent.children.indexOf(elem);
-          if (idx >= 0) elem.parent.children.splice(idx, 1);
-        }
-      },
-    };
-    return elem;
-  }
-
-  const section = makeElement("section");
-  section.id = "export";
-  const comingSoon = makeElement("p");
-  comingSoon.className = "muted";
-  comingSoon.textContent = "Coming soon";
-  comingSoon.parent = section;
-  section.appendChild(comingSoon);
-
-  const mockDoc = {
-    createElement: makeElement,
-  };
-  globalThis.document = mockDoc;
-  globalThis.PrairieRunIcsWriter = icsWriter;
-
-  let savedStorage = {
-    prairierunDeadlines: FOUR_ITEMS,
-    prairierunSettings: {
-      sources: {
-        prairielearn: { enabled: true },
-        canvas: { enabled: true },
-        gradescope: { enabled: false },
-      },
-    },
-    prairierunIcsSequences: {},
-  };
-
-  globalThis.PrairieRunExt = {
-    storageLocalGet: async (keys) => {
-      const out = {};
-      for (const k of Array.isArray(keys) ? keys : [keys]) {
-        out[k] = savedStorage[k];
-      }
-      return out;
-    },
-    storageLocalSet: async (items) => {
-      Object.assign(savedStorage, items);
-    },
-  };
-
-  await optionsExport.render(section);
-
-  // Coming soon note removed
-  const notes = section.querySelectorAll("p.muted").filter((p) =>
-    /coming soon/i.test(p.textContent || "")
-  );
-  assert.equal(notes.length, 0, "Coming soon note must be removed");
-
-  // Export buttons container exists
-  const allBtn = section.querySelector("#export-all-ics");
-  assert.ok(allBtn, "Download all (.ics) button must exist");
-
-  const plBtn = section.querySelector("#export-prairielearn-ics");
-  assert.ok(plBtn, "Download PrairieLearn (.ics) button must exist");
-
-  const canvasBtn = section.querySelector("#export-canvas-ics");
-  assert.ok(canvasBtn, "Download Canvas (.ics) button must exist");
-
-  const gsBtn = section.querySelector("#export-gradescope-ics");
-  assert.equal(gsBtn, null, "Disabled source button must not exist");
+  assert.ok(text.includes("BEGIN:VCALENDAR"));
+  assert.ok(text.includes("TRIGGER:-PT120M"), "leadMinutes from output settings must drive the alarm trigger");
+  assert.ok(sequences[FOUR_ITEMS[0].id]);
+  assert.equal(sequences[FOUR_ITEMS[0].id].n, 0, "First build must persist sequence 0 for the item");
 });
 
 test("Round-trip: if ics-parse.js from PR 4 is present, parsing the output returns the same UIDs and instants", (t) => {

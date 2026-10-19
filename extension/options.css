@@ -34,22 +34,6 @@ header.page-head {
 h1 { margin: 0; font-size: 26px; letter-spacing: -.02em; }
 h2 { margin: 0; font-size: 14px; font-weight: 700; }
 
-.status-chip {
-  margin: 0 0 0 auto;
-  max-width: 60%;
-  padding: 7px 12px;
-  border-radius: 999px;
-  background: #eef4fb;
-  border: 1px solid #cfe0f3;
-  color: #1a4fa0;
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.status-chip.error { background: #fbe3e3; border-color: #f0c4c4; color: #a32929; }
-
 .page-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -167,6 +151,13 @@ button.source-action { width: 100%; padding: 6px 10px; font-size: 11px; }
 .card ul, .card ol { margin: 8px 0 0; padding-left: 18px; font-size: 12px; color: #405263; }
 .card h3 { margin: 14px 0 4px; font-size: 12px; }
 
-/* Export / Data */
-.prr-export-buttons button { margin: 0; }
+/* Data */
 .data-card button { border-color: #e0b4b4; color: #a32929; }
+
+/* Calendar feed card: hidden-attribute override (a display:flex rule on
+   auth-redirect-row would otherwise keep the URL row visible when it has no
+   URL) and the collapsed custom-relay details. */
+.prr-feed-url-row[hidden] { display: none !important; }
+details.prr-feed-custom { margin-top: 10px; }
+details.prr-feed-custom summary { cursor: pointer; font-size: 12px; color: #607080; user-select: none; }
+details.prr-feed-custom[open] summary { margin-bottom: 2px; }

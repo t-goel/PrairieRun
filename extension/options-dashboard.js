@@ -2,7 +2,6 @@
 // (settings, Google Calendar auth, source status, Sync now). Lives on the
 // same message contract as the removed popup (PRAIRIERUN_GET_STATE /
 // PRAIRIERUN_AUTH_* / PRAIRIERUN_SYNC_NOW).
-const contextElement = document.querySelector("#context");
 const notificationLeadElement = document.querySelector("#notification-lead-hours");
 const completionThresholdElement = document.querySelector("#completion-threshold");
 const resetDataButton = document.querySelector("#reset-data");
@@ -20,10 +19,18 @@ let settings = { notificationLeadMinutes: 240, completionThreshold: 95 };
 let cachedSources = [];
 let cachedSourceStatus = {};
 
+// All dashboard notices share the Sources card status line; the old header
+// status chip is gone.
 function showStatus(text, error = false) {
-  contextElement.hidden = !text;
-  contextElement.textContent = text;
-  contextElement.classList.toggle("error", error);
+  showSyncStatus(text, error);
+}
+// Firefox-only OAuth-client failures read too technical for the main status
+// line, so simplify them and point at the no-setup Calendar feed path.
+function friendlySyncMessage(text) {
+  if (/googleClientId|Firefox needs its own Google OAuth client/.test(text || "")) {
+    return "Google direct sync needs the Firefox client ID. This is optional — the Calendar feed card works without it.";
+  }
+  return text;
 }
 function showSyncStatus(text, error = false) {
   syncStatusElement.hidden = !text;
@@ -54,9 +61,9 @@ function refreshState() {
     cachedSourceStatus = response.sourceStatus || {};
     renderSources();
     if (response.sync?.state === "scanning") showStatus(`${response.sync.current || "Scanning…"} (${response.sync.found || 0} found)`);
-    else if (response.sync?.state === "syncing") showStatus(response.sync.current || "Synchronizing Google Calendar…");
-    else if (response.sync?.state === "auth_required") showStatus(response.sync.current || "Connect Google Calendar to sync.", true);
-    else if (response.sync?.state === "error") showStatus(response.sync.current || "Sync failed.", true);
+    else if (response.sync?.state === "syncing") showStatus(friendlySyncMessage(response.sync.current) || "Synchronizing Google Calendar…");
+    else if (response.sync?.state === "auth_required") showStatus(friendlySyncMessage(response.sync.current) || "Connect Google Calendar to sync.", true);
+    else if (response.sync?.state === "error") showStatus(friendlySyncMessage(response.sync.current) || "Sync failed.", true);
     else showStatus("");
   }).catch((error) => showStatus(error.message, true));
 }

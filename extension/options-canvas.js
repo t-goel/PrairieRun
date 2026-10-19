@@ -8,7 +8,10 @@
 (function () {
   const CANVAS_PERMISSION = "https://canvas.illinois.edu/*";
   const ILLINOIS_FEED_RE = /^https:\/\/canvas\.illinois\.edu\/feeds\/calendars\/user_[A-Za-z0-9]+\.ics$/;
-  const GENERIC_FEED_RE = /^https:\/\/[^/\s]+\/feeds\/calendars\/user_[A-Za-z0-9]+\.ics$/;
+  // Real Canvas feed URLs may carry signed query parameters (e.g.
+  // "?ex=...&xs=..."), so allow an optional query string after ".ics".
+  const GENERIC_FEED_RE = /^https:\/\/[^/\s]+\/feeds\/calendars\/user_[A-Za-z0-9]+\.ics(?:\?\S*)?$/;
+  const RESYNC_TIMEOUT_MS = 5000;
 
   function ext() {
     return globalThis.PrairieRunExt || null;
@@ -55,6 +58,26 @@
       return typeof url === "string" ? url : "";
     } catch {
       return "";
+    }
+  }
+
+  // Best-effort: after a feed URL save/clear, ask the background to re-sync the
+  // enabled sources so the Sources card row reflects reality immediately. Only
+  // runs when Canvas is enabled (a sync while disabled would not change the
+  // stored status anyway). Failures and slow responses are ignored.
+  async function triggerResync() {
+    try {
+      const canvas = await loadCanvasSettings();
+      if (!canvas.enabled) return;
+      const api = ext();
+      const send = api?.runtimeSendMessage;
+      if (typeof send !== "function") return;
+      await Promise.race([
+        Promise.resolve(send.call(api, { type: "PRAIRIERUN_SYNC_NOW" })),
+        new Promise((resolve) => setTimeout(resolve, RESYNC_TIMEOUT_MS)),
+      ]);
+    } catch {
+      // Best-effort only; the next natural sync will pick up the change.
     }
   }
 
@@ -172,6 +195,7 @@
         await saveFeedUrl(url);
         feedInput.value = "";
         await refreshSaved();
+        await triggerResync();
         if (ILLINOIS_FEED_RE.test(url)) {
           setMessage(message, "Feed URL saved.", null);
         } else {
@@ -187,6 +211,7 @@
         await saveFeedUrl("");
         feedInput.value = "";
         await refreshSaved();
+        await triggerResync();
         setMessage(message, "Feed URL cleared.", null);
       } catch {
         setMessage(message, "Could not clear the feed URL.", "error");

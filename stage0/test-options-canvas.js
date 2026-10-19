@@ -125,6 +125,7 @@ function makeHarness({ grantPermission = true, seedSecrets = {}, seedSettings = 
     prairierunSettings: { ...seedSettings },
   };
   const permissionCalls = [];
+  const messengerCalls = [];
   global.document = {
     createElement: (tag) => makeNode(tag),
     createTextNode: (text) => makeTextNode(text),
@@ -136,8 +137,12 @@ function makeHarness({ grantPermission = true, seedSecrets = {}, seedSettings = 
       permissionCalls.push(origins);
       return grantPermission;
     },
+    runtimeSendMessage: async (message) => {
+      messengerCalls.push(message);
+      return { ok: true };
+    },
   };
-  return { store, permissionCalls };
+  return { store, permissionCalls, messengerCalls };
 }
 
 const TOKEN = "secretTOKEN99";
@@ -209,6 +214,61 @@ test("illinois feed URL saves cleanly; other hosts save with a warning", async (
   await fire(save, "click");
   assert.equal(store.prairierunSecrets.canvasFeedUrl, "https://canvas.example.edu/feeds/calendars/user_abc123.ics");
   assert.match(find(section, '[data-pr-canvas-message]').textContent, /not a canvas\.illinois\.edu feed/);
+});
+
+test("feed URL with query parameters is accepted", async () => {
+  const section = newSection();
+  const { store } = await renderFresh(section);
+  const input = find(section, '[data-pr-canvas-feed]');
+  const save = section.querySelectorAll("button")[0];
+  input.value = `https://canvas.illinois.edu/feeds/calendars/user_${TOKEN}.ics?ex=abc123&xs=4ed5f6a7b8`;
+  await fire(save, "click");
+  assert.equal(
+    store.prairierunSecrets.canvasFeedUrl,
+    `https://canvas.illinois.edu/feeds/calendars/user_${TOKEN}.ics?ex=abc123&xs=4ed5f6a7b8`,
+  );
+  assert.match(find(section, '[data-pr-canvas-message]').textContent, /saved/i);
+});
+
+test("saving the feed URL triggers a background resync when Canvas is enabled", async () => {
+  const section = newSection();
+  const { store, messengerCalls } = await renderFresh(section, {
+    seedSettings: { sources: { canvas: { enabled: true } } },
+  });
+  const input = find(section, '[data-pr-canvas-feed]');
+  input.value = GOOD_URL;
+  await fire(section.querySelectorAll("button")[0], "click");
+  assert.equal(store.prairierunSecrets.canvasFeedUrl, GOOD_URL);
+  assert.deepEqual(messengerCalls, [{ type: "PRAIRIERUN_SYNC_NOW" }]);
+});
+
+test("saving the feed URL does not resync while Canvas is disabled", async () => {
+  const section = newSection();
+  const { store, messengerCalls } = await renderFresh(section);
+  const input = find(section, '[data-pr-canvas-feed]');
+  input.value = GOOD_URL;
+  await fire(section.querySelectorAll("button")[0], "click");
+  assert.equal(store.prairierunSecrets.canvasFeedUrl, GOOD_URL);
+  assert.deepEqual(messengerCalls, []);
+});
+
+test("clearing the feed URL triggers a resync only while Canvas is enabled", async () => {
+  const section = newSection();
+  const { store, messengerCalls } = await renderFresh(section, {
+    seedSecrets: { canvasFeedUrl: GOOD_URL },
+    seedSettings: { sources: { canvas: { enabled: true } } },
+  });
+  await fire(section.querySelectorAll("button")[1], "click");
+  assert.equal(store.prairierunSecrets.canvasFeedUrl, undefined);
+  assert.deepEqual(messengerCalls, [{ type: "PRAIRIERUN_SYNC_NOW" }]);
+
+  const disabledSection = newSection();
+  const disabled = await renderFresh(disabledSection, {
+    seedSecrets: { canvasFeedUrl: GOOD_URL },
+  });
+  await fire(disabledSection.querySelectorAll("button")[1], "click");
+  assert.equal(disabled.store.prairierunSecrets.canvasFeedUrl, undefined);
+  assert.deepEqual(disabled.messengerCalls, []);
 });
 
 test("enable toggle requests host permission from the click", async () => {

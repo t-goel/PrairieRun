@@ -1,7 +1,9 @@
 // PrairieRun iCal relay — publish endpoint.
 //
-// The extension POSTs { feedId, ics } here with header x-prairierun-key
-// matching the relay's PUBLISH_KEY env var. The body is stored as a public
+// The extension POSTs { feedId, ics } here with header x-prairierun-key that
+// matches either the relay's PUBLISH_KEY env var (owner/master key) or a
+// per-feed key: HMAC-SHA256(PUBLISH_KEY, feedId) for the feedId in the same
+// request body, as minted by /api/claim. The body is stored as a public
 // blob at feeds/<feedId>.ics; the returned blob URL is the stable
 // subscription URL (same pathname on every publish, so subscribers
 // auto-update).
@@ -14,9 +16,16 @@
 // even before the relay host is granted as an optional host permission
 // (background auto-publishes use the granted permission and skip silently).
 const { put } = require("@vercel/blob");
+const { createHmac } = require("crypto");
 
 const FEED_ID_RE = /^[a-z0-9][a-z0-9-]{5,63}$/;
 const MAX_ICS_BYTES = 2 * 1024 * 1024;
+
+function timingSafeEquals(provided, expected) {
+  // Constant-time-ish comparison without extra deps.
+  return provided.length === expected.length &&
+    provided.split("").reduce((a, c, i) => a | (c.charCodeAt(0) ^ expected.charCodeAt(i)), 0) === 0;
+}
 
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -40,13 +49,10 @@ module.exports = async function handler(req, res) {
     return;
   }
   const provided = req.headers["x-prairierun-key"] || "";
-  // Constant-time-ish comparison without extra deps.
-  if (provided.length !== publishKey.length || provided.split("").reduce((a, c, i) => a | (c.charCodeAt(0) ^ publishKey.charCodeAt(i)), 0) !== 0) {
-    res.statusCode = 401;
-    res.end(JSON.stringify({ ok: false, error: "Unauthorized." }));
-    return;
-  }
-
+  // Accept the owner/master PUBLISH_KEY, or a per-feed key minted by /api/claim:
+  // HMAC-SHA256(PUBLISH_KEY, feedId) for the feedId carried in this request.
+  const masterMismatch = provided.length !== publishKey.length ||
+    provided.split("").reduce((a, c, i) => a | (c.charCodeAt(0) ^ publishKey.charCodeAt(i)), 0) !== 0;
   let body = {};
   try {
     body = typeof req.body === "object" ? req.body : JSON.parse(req.body || "{}");
@@ -56,6 +62,13 @@ module.exports = async function handler(req, res) {
     return;
   }
   const feedId = typeof body.feedId === "string" ? body.feedId.toLowerCase() : "";
+  const feedKey = createHmac("sha256", publishKey).update(feedId).digest("hex");
+  const feedOk = provided.length > 0 && timingSafeEquals(provided, feedKey);
+  if (masterMismatch && !feedOk) {
+    res.statusCode = 401;
+    res.end(JSON.stringify({ ok: false, error: "Unauthorized." }));
+    return;
+  }
   const ics = typeof body.ics === "string" ? body.ics : "";
   if (!FEED_ID_RE.test(feedId)) {
     res.statusCode = 400;

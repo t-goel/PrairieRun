@@ -38,8 +38,10 @@ relay/      -> Vercel relay that hosts the auto-updating iCal feed
 `extension/options.html` is the full dashboard page (no popup). The toolbar
 button opens it via `action.onClicked` (`PrairieRunExt
 .addActionClickedListener`); `options-dashboard.js` drives settings, auth,
-source rows, and Sync now; section scripts render Canvas, course links,
-export, and the Calendar feed card.
+source rows, and Sync now; section scripts render Canvas setup, course links,
+and the Calendar feed card (one-click activation via the bundled relay's
+`/api/claim`, custom relays in a collapsed details; manual `.ics` export
+buttons were removed — the auto-updating feed supersedes them).
 
 `extension/background.js` imports `extension/oauth-config.js`,
 `extension/auth-utils.js`, then `extension/calendar.js`; `calendar.js` is a
@@ -103,8 +105,12 @@ per-project change). `auth-utils.js` is the pure error-classification helper
   for sync.
 - Calendar events should be one-hour blocks ending at the assignment due date.
 - The hosted iCal feed (Calendar feed card + the `relay/` Vercel scaffold) is
-  the first-class, no-setup calendar integration: the extension publishes the
-  full ICS after every successful sync via `outputs.js` -> `relay-push.js`
+  the first-class, no-setup calendar integration: "Get my feed URL" claims a
+  per-install feed ID + HMAC-derived key from the bundled default relay's
+  `/api/claim` (`relay/api/claim.js`; the master `PUBLISH_KEY` env secret
+  never ships to clients, and a minted key only works for its own feedId).
+  The extension publishes the full ICS after every successful sync via
+  `outputs.js` -> `relay-push.js`
   (`prairierunSettings.relay`, `prairierunSecrets.relayPublishKey`,
   `prairierunRelayStatus`), and the feed URL is the subscription target for
   any calendar app. Never send users through Google Cloud Console as part of
@@ -262,9 +268,14 @@ in parallel without touching shared files. No user-visible behavior change.
   (PR 11 content) and `outputs.js` (PR 9 content) are live now — the hosted
   iCal feed publishes after every sync — plus `options-dashboard.js`
   (replaces the removed popup) and `options-feed.js` (Calendar feed card).
-- `relay/`: self-contained Vercel relay scaffold hosting the feed
-  (`relay/api/publish.js` + Blob storage). Deployed separately; see
-  `relay/README.md`.
+- Removed with the owner's approval: the toolbar popup and its files, the
+  "Output"/"Relay" Coming-soon stub sections (`options-output.js` was a PR 1
+  stub, later PR 8's manual `options-export.js` was removed in favor of the
+  feed), and the dashboard header status chip (status lives in the Sources
+  card line).
+- `relay/`: minimal Vercel relay scaffold (`api/claim.js` mints per-install
+  feed IDs + HMAC keys; `api/publish.js` Blob-stores the ICS). Deployed once
+  by the owner; see `relay/README.md`.
 - Background load order (`importScripts` + `FIREFOX_BACKGROUND_SCRIPTS`):
   `compat.js`, `oauth-config.js`, `auth-utils.js`, `deadline-model.js`,
   `source-registry.js`, `net.js`, `parse-host.js`, `prairielearn-adapter.js`,

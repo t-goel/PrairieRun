@@ -5,12 +5,17 @@
 // the latest due dates.
 //
 // Feed config lives in prairierunSettings.relay: { enabled, relayUrl, feedId }.
-// The relay publish key lives in prairierunSecrets.relayPublishKey.
+// The relay publish key lives in prairierunSecrets.relayPublishKey; the
+// one-click activation path (claimFeed) receives that key from the relay's
+// /api/claim rather than asking the user to paste it.
 // Push-state lives in prairierunRelayStatus: { state, url, publishedAt, error }.
 (function () {
   const STATUS_KEY = "prairierunRelayStatus";
   const SEQUENCES_KEY = "prairierunIcsSequences";
   const SETTINGS_KEY = "prairierunSettings";
+  // Bundled relay scaffold's default deployment; used when the user has not
+  // configured a custom relay URL.
+  const DEFAULT_RELAY_URL = "https://prairierun-feed.vercel.app";
 
   function ext() {
     return globalThis.PrairieRunExt || null;
@@ -202,6 +207,39 @@
     return publish(items, { settings: stored[SETTINGS_KEY] || settings, secrets: secrets.prairierunSecrets || {} });
   }
 
+  // One-click activation: mints { feedId, key } from the relay's /api/claim.
+  // Never throws; always resolves { ok, feedId, key, error } with a short
+  // human-readable error on any failure.
+  async function claimFeed(baseUrl) {
+    const fail = (error) => ({ ok: false, feedId: "", key: "", error });
+    const base = String(baseUrl || "").trim().replace(/\/+$/, "");
+    if (!/^https:\/\//i.test(base)) {
+      return fail("The relay URL must be an https:// address.");
+    }
+    let response;
+    try {
+      response = await fetch(`${base}/api/claim`);
+    } catch {
+      return fail("Could not reach the PrairieRun feed relay; try again or set a custom relay below.");
+    }
+    if (!response.ok) {
+      const code = response.status;
+      return fail(code === 429
+        ? "The feed relay is rate-limiting new feeds right now; try again in a minute."
+        : `Could not create a new feed (${code}). Try again or set a custom relay below.`);
+    }
+    let data = null;
+    try {
+      data = await response.json();
+    } catch { /* fall through to field validation below */ }
+    const feedId = typeof data?.feedId === "string" ? data.feedId : "";
+    const key = typeof data?.key === "string" ? data.key : "";
+    if (!feedId || !key) {
+      return fail("The feed relay returned incomplete data; try again.");
+    }
+    return { ok: true, feedId, key, error: "" };
+  }
+
   // Options-page helper: does a granted optional permission cover the relay?
   async function hasRelayPermission(relayUrl) {
     const api = ext();
@@ -223,7 +261,7 @@
     return publish(items, { settings, secrets: secrets || {} });
   }
 
-  const api = { publish, autoPublish, hasRelayPermission, publishFromUserGesture, readState, readFeedConfig };
+  const api = { publish, autoPublish, hasRelayPermission, publishFromUserGesture, claimFeed, readState, readFeedConfig, DEFAULT_RELAY_URL };
   globalThis.PrairieRunRelay = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })();

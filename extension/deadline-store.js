@@ -1,8 +1,9 @@
 // PrairieRun deadline store (PR 7): per-source merge, course linking, cross-source dedupe.
 // No bundler: plain IIFE script. Loads in background, options, and Node tests.
 (function () {
-  // Dedupe window: two items with the same normalized title in linked courses
-  // merge only when both have dueAt and |delta| <= 5 minutes.
+  // Dedupe window: two items with equal or prefix-related normalized titles
+  // in linked course families merge only when both have dueAt and |delta|
+  // <= 5 minutes.
   const DEDUPE_WINDOW_MS = 5 * 60 * 1000;
 
   // Winner precedence: sources with real status beat the Canvas feed.
@@ -15,6 +16,13 @@
   };
 
   const LINKED_SOURCES = ["prairielearn", "gradescope", "canvas", "prairietest"];
+
+  // Course family heuristic: trailing section/instance suffixes that may be
+  // ignored when deciding whether two course codes are the same course
+  // ("CS498" / "CS498DK" / "CS498DK2" are one family). Treated as heuristic;
+  // extend this list for new naming schemes. Longest entries are matched
+  // first when stripping, so e.g. "DK2" wins over "DK".
+  const COURSE_FAMILY_SUFFIXES = ["DK2", "DK", "D2", "ONL", "ON", "X", "A", "B", "C", "AD1", "AL1"];
 
   function precedenceOf(source) {
     const rank = PRECEDENCE[source];
@@ -34,14 +42,17 @@
     return JSON.stringify(item);
   }
 
-  // Normalize a course code for grouping: uppercase, single spaces.
-  // Extracts the core "SUBJ NNN" prefix so long display names such as
-  // "CS 425 AL1 Fall 2026 CRN12345" group under "CS 425".
+  // Normalize a course code for grouping: uppercase, strip ALL whitespace and
+  // non-alphanumeric punctuation, so "CS 498", "cs-498", and "CS498" produce
+  // the same key. Keeps a leading "SUBJ + 3 digits (+ up to 3 trailing
+  // letters/digits)" core so long display names such as "CS 425 AL1 Fall
+  // 2026 CRN12345" do not leak into the key; the family rule below re-links
+  // suffixed variants into one family.
   function normalizeCourseCode(value) {
-    const upper = String(value || "").toUpperCase().replace(/_/g, " ").replace(/\s+/g, " ").trim();
-    if (!upper) return "";
-    const match = upper.match(/^([A-Z]{2,4})\s+(\d{3}[A-Z]{0,3})/);
-    return match ? `${match[1]} ${match[2]}` : upper;
+    const text = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!text) return "";
+    const match = text.match(/^([A-Z]{2,4})(\d{3})([A-Z0-9]{0,3})/);
+    return match ? `${match[1]}${match[2]}${match[3] || ""}` : text;
   }
 
   function courseCodeOf(item) {
@@ -65,10 +76,90 @@
     return text.replace(/\s+/g, " ").trim();
   }
 
-  // Group items by normalized course code. Returns CourseLinks with
-  // confirmed:false (suggestions only; the user confirms in the options page).
+  // Family rule: two normalized course codes belong to the same course family
+  // when one is a left-prefix of the other and the extra tail (beyond the
+  // shorter key) is either a known section/instance suffix ("CS498" vs
+  // "CS498DK2") or a 2+ character tail with at least one letter. Digit-only
+  // tails, and tails that continue the shorter key's trailing digit run, are
+  // never families: "CS4" vs "CS498" and "CS49" vs "CS498" stay separate.
+  function sameCourseFamily(first, second) {
+    if (!first || !second) return false;
+    if (first === second) return true;
+    const [shorter, longer] = first.length <= second.length ? [first, second] : [second, first];
+    if (!longer.startsWith(shorter)) return false;
+    const extra = longer.slice(shorter.length);
+    if (COURSE_FAMILY_SUFFIXES.includes(extra)) return true;
+    if (/\d$/.test(shorter) && /^\d/.test(extra)) return false;
+    return extra.length >= 2 && /[A-Z]/.test(extra);
+  }
+
+  // Transitive family clustering over normalized keys. Returns a Map of key
+  // -> representative, where the representative is the family's shortest key
+  // (lexicographic tiebreak), so "CS498", "CS498DK", and "CS498DK2" all map
+  // to one suggested bucket whose code is "CS498".
+  function familyMapOf(keys) {
+    const unique = [...new Set(keys.filter(Boolean))];
+    const parent = new Map(unique.map((key) => [key, key]));
+    const find = (key) => {
+      let root = key;
+      while (parent.get(root) !== root) root = parent.get(root);
+      while (parent.get(key) !== root) {
+        const next = parent.get(key);
+        parent.set(key, root);
+        key = next;
+      }
+      return root;
+    };
+    for (let i = 0; i < unique.length; i += 1) {
+      for (let j = i + 1; j < unique.length; j += 1) {
+        if (!sameCourseFamily(unique[i], unique[j])) continue;
+        const a = find(unique[i]);
+        const b = find(unique[j]);
+        if (a === b) continue;
+        // Deterministic root; the final representative is recomputed from
+        // full cluster membership below.
+        const rep = a.length < b.length || (a.length === b.length && a.localeCompare(b) < 0) ? a : b;
+        parent.set(a, rep);
+        parent.set(b, rep);
+      }
+    }
+    const clusters = new Map();
+    for (const key of unique) {
+      const root = find(key);
+      if (!clusters.has(root)) clusters.set(root, []);
+      clusters.get(root).push(key);
+    }
+    const map = new Map();
+    for (const members of clusters.values()) {
+      let rep = members[0];
+      for (const key of members) {
+        if (key.length < rep.length || (key.length === rep.length && key.localeCompare(rep) < 0)) rep = key;
+      }
+      for (const member of members) map.set(member, rep);
+    }
+    return map;
+  }
+
+  // Title family rule for near-miss detection: two normalized titles relate
+  // when they are equal, or when one is a left-prefix of the other with a 2+
+  // character extra tail ("quiz 1" vs "quiz 1 extension"). An all-digit tail
+  // never relates ("quiz 1" vs "quiz 10" are different assignments).
+  function relatedTitles(first, second) {
+    if (!first || !second) return false;
+    if (first === second) return true;
+    const [shorter, longer] = first.length <= second.length ? [first, second] : [second, first];
+    if (!longer.startsWith(shorter)) return false;
+    const extra = longer.slice(shorter.length);
+    return extra.length >= 2 && !/^\d+$/.test(extra);
+  }
+
+  // Group items by course code, then fold codes that belong to the same
+  // course family into one suggested bucket keyed by the family's shortest
+  // normalized code, so "CS 498 | CS 498DK | CS 498DK2" all appear under one
+  // row ("CS498"). Returns CourseLinks with confirmed:false (suggestions
+  // only; the user confirms in the options page).
   function suggestCourseLinks(items) {
-    const links = {};
+    const byCode = {};
     for (const item of items || []) {
       const code = courseCodeOf(item);
       if (!code) continue;
@@ -76,12 +167,28 @@
       const courseKey = item?.courseKey;
       if (!source || !courseKey) continue;
       if (!LINKED_SOURCES.includes(source)) continue;
-      if (!links[code]) links[code] = { confirmed: false };
-      const entry = links[code];
+      if (!byCode[code]) byCode[code] = { confirmed: false };
+      const entry = byCode[code];
       if (!Array.isArray(entry[source])) entry[source] = [];
       if (!entry[source].includes(courseKey)) {
         entry[source].push(courseKey);
         entry[source].sort();
+      }
+    }
+    const family = familyMapOf(Object.keys(byCode));
+    const links = {};
+    for (const [code, entry] of Object.entries(byCode)) {
+      const bucketCode = family.get(code) || code;
+      if (!links[bucketCode]) links[bucketCode] = { confirmed: false };
+      const target = links[bucketCode];
+      for (const source of LINKED_SOURCES) {
+        const keys = entry[source];
+        if (!Array.isArray(keys)) continue;
+        if (!Array.isArray(target[source])) target[source] = [];
+        for (const key of keys) {
+          if (!target[source].includes(key)) target[source].push(key);
+        }
+        target[source].sort();
       }
     }
     return links;
@@ -133,53 +240,69 @@
   }
 
   // Dedupe items across confirmed course links. Returns { items, nearMisses }.
-  // nearMisses holds [{ a, b, deltaMinutes }] for same-title pairs in linked
-  // courses whose due dates differ by more than 5 minutes (never merged).
+  // Candidates are grouped by linked course *family*; a pair merges when its
+  // normalized titles are equal or one is a title prefix of the other
+  // (relatedTitles) and both due dates sit within 5 minutes. nearMisses holds
+  // [{ a, b, deltaMinutes }] for related-title pairs in linked courses whose
+  // due dates differ by more than 5 minutes (never merged).
   function dedupe(items, links) {
     const working = (items || []).map(cloneItem);
     const linkIndex = confirmedLinkIndex(links);
     const nearMisses = [];
 
-    // Group candidate indexes by (linked course code, normalized title).
-    const groups = new Map();
+    const codes = working.map((item) => {
+      const raw = item?.courseKey != null ? linkIndex.get(item.courseKey) : null;
+      return raw == null ? "" : normalizeCourseCode(raw);
+    });
+    const family = familyMapOf(codes);
+
+    // Group candidate indexes by linked course family.
+    const buckets = new Map();
     working.forEach((item, index) => {
-      const code = item?.courseKey != null ? linkIndex.get(item.courseKey) : undefined;
+      const code = codes[index];
       if (!code) return;
-      const key = `${code}\n${normTitle(item?.title)}`;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(index);
+      const bucket = family.get(code) || code;
+      if (!buckets.has(bucket)) buckets.set(bucket, []);
+      buckets.get(bucket).push(index);
     });
 
     const removed = new Set();
-    for (const indexes of groups.values()) {
+    for (const indexes of buckets.values()) {
       if (indexes.length < 2) continue;
-      // Deterministic winner: highest precedence first, then stable id order.
+      // Deterministic order: highest precedence first, then stable id order.
       const ordered = [...indexes].sort((a, b) => {
         const rank = precedenceOf(working[a]?.source) - precedenceOf(working[b]?.source);
         if (rank !== 0) return rank;
         return String(working[a]?.id || "").localeCompare(String(working[b]?.id || ""));
       });
-      let winnerIndex = ordered[0];
-      for (let i = 1; i < ordered.length; i += 1) {
-        const candidateIndex = ordered[i];
-        const winner = working[winnerIndex];
-        const candidate = working[candidateIndex];
-        // Never merge two items from the same source: without a second
-        // source there is no cross-source evidence, so leave both in place.
-        if (candidate.source === winner.source) continue;
-        const winnerDue = dueMs(winner);
-        const candidateDue = dueMs(candidate);
-        if (winnerDue == null || candidateDue == null) continue;
-        const deltaMinutes = Math.abs(winnerDue - candidateDue) / 60000;
-        if (Math.abs(winnerDue - candidateDue) <= DEDUPE_WINDOW_MS) {
-          working[winnerIndex] = mergePair(winner, candidate);
-          removed.add(candidateIndex);
-        } else {
-          nearMisses.push({
-            a: winner.id,
-            b: candidate.id,
-            deltaMinutes: Math.round(deltaMinutes * 10) / 10,
-          });
+      // Pairwise over the ordered bucket: each item is a potential winner
+      // against every later item whose related title makes it a duplicate or
+      // a near miss. Same-source pairs are skipped: without a second source
+      // there is no cross-source evidence, so leave both in place.
+      for (let winnerAt = 0; winnerAt < ordered.length - 1; winnerAt += 1) {
+        const winnerIndex = ordered[winnerAt];
+        if (removed.has(winnerIndex)) continue;
+        for (let candidateAt = winnerAt + 1; candidateAt < ordered.length; candidateAt += 1) {
+          const candidateIndex = ordered[candidateAt];
+          if (removed.has(candidateIndex)) continue;
+          const winner = working[winnerIndex];
+          const candidate = working[candidateIndex];
+          if (candidate.source === winner.source) continue;
+          if (!relatedTitles(normTitle(winner?.title), normTitle(candidate?.title))) continue;
+          const winnerDue = dueMs(winner);
+          const candidateDue = dueMs(candidate);
+          if (winnerDue == null || candidateDue == null) continue;
+          const deltaMinutes = Math.abs(winnerDue - candidateDue) / 60000;
+          if (Math.abs(winnerDue - candidateDue) <= DEDUPE_WINDOW_MS) {
+            working[winnerIndex] = mergePair(winner, candidate);
+            removed.add(candidateIndex);
+          } else {
+            nearMisses.push({
+              a: winner.id,
+              b: candidate.id,
+              deltaMinutes: Math.round(deltaMinutes * 10) / 10,
+            });
+          }
         }
       }
     }

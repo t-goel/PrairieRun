@@ -65,18 +65,23 @@ agent-facing project rules.
 ## Current surfaces (dashboard era)
 
 - There is no toolbar popup. The toolbar button opens the full dashboard page
-  (`extension/options.html`) in a tab; sections render inside cards.
+  (`extension/options.html`) in a tab; sections render inside cards. There is
+  no header status bar — live status lives in the Sources card's status line.
 - Sources card: one row per registered source with an enable switch. Disabled
   sources read "off"; enabling a source first asks for its host permission
   (the toggle click is the gesture) and then triggers an immediate background
   sync so status becomes real right away. Rows offer Sign in (signed-out
   state), Grant access (missing-permission state), and show per-source last
-  checked times in Central time.
-- Calendar feed card (first-class calendar path): configure a relay URL +
-  publish key once, and the feed auto-publishes after every successful sync.
-  The page shows the stable subscription URL with a copy button, Publish now,
-  and auto-update on/off. No Google Cloud Console work is ever part of
-  ordinary setup.
+  checked times in Central time. Saving the Canvas feed URL in the Canvas
+  card triggers the same immediate re-sync.
+- Calendar feed card (first-class calendar path): "Get my feed URL" activates
+  everything in one click against the bundled default relay (per-install feed
+  ID + HMAC key minted at `/api/claim`); the page shows the stable
+  subscription URL with a copy button, and the feed auto-publishes after
+  every successful sync. Custom relays live in a collapsed "Use a custom
+  relay" details. No Google Cloud Console work is ever part of ordinary
+  setup, and there are no manual .ics download buttons (the feed replaces
+  them).
 - Google Calendar card (optional path): Connect/Disconnect remains available;
   when the OAuth client is not configured on the device, the card says so and
   points at the Calendar feed card instead of setup instructions.

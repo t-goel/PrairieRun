@@ -2,7 +2,7 @@
 (function () {
   function renderComingSoon() {
     if (typeof document === "undefined") return;
-    for (const id of ["sources", "canvas-settings", "course-links", "export", "output", "relay"]) {
+    for (const id of ["sources", "canvas-settings", "course-links"]) {
       const section = document.getElementById(id);
       if (section && !section.querySelector("p")) {
         const note = document.createElement("p");
