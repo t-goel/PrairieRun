@@ -9,9 +9,14 @@ Deploy once per household/organization:
 
 1. Install the Vercel CLI (`npm i -g vercel`) and run `vercel` inside this
    `relay/` directory; link it to one project.
-2. Create a Blob store for the project: Vercel dashboard → the relay project →
-   **Storage** → **Blob** → create + connect. `BLOB_READ_WRITE_TOKEN` is then
-   injected automatically.
+2. Create a Blob store for the project with **public** access — subscribers
+   fetch the `.ics` URL directly, so a private store breaks publish (Vercel
+   Blob rejects `access: "public"` uploads on private stores):
+   `vercel blob create-store <name> --access public --yes` (CLI creates and
+   links it, injecting `BLOB_READ_WRITE_TOKEN`), or Vercel dashboard → the
+   relay project → **Storage** → **Blob** → create + connect.
+   (Live deployment as of 2026-10: project `prairierun-feed` at
+   `https://prairierun-feed.vercel.app`.)
 3. Generate a publish secret and add it to the project env:
    - `openssl rand -hex 24` (or any long random string)
    - `vercel env add PUBLISH_KEY production` (+ preview/development as needed)

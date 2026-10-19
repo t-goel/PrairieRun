@@ -275,7 +275,10 @@ in parallel without touching shared files. No user-visible behavior change.
   card line).
 - `relay/`: minimal Vercel relay scaffold (`api/claim.js` mints per-install
   feed IDs + HMAC keys; `api/publish.js` Blob-stores the ICS). Deployed once
-  by the owner; see `relay/README.md`.
+  by the owner; see `relay/README.md`. Live at
+  `https://prairierun-feed.vercel.app` (Vercel project `prairierun-feed`;
+  its Blob store must have public access). Deploy with `vercel --prod`
+  from `relay/`.
 - Background load order (`importScripts` + `FIREFOX_BACKGROUND_SCRIPTS`):
   `compat.js`, `oauth-config.js`, `auth-utils.js`, `deadline-model.js`,
   `source-registry.js`, `net.js`, `parse-host.js`, `prairielearn-adapter.js`,
