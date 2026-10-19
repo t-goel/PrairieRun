@@ -14,8 +14,9 @@ const CALENDAR_REPAIR_VERSION = 2;
 const ASSIGNMENT_LINKS_KEY = "prairierunAssignmentLinks";
 const DAILY_CALENDAR_SYNC_ALARM = "prairierun-daily-calendar-sync";
 const DAILY_CALENDAR_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const BACKGROUND_SYNC_ALARM = "prairierun-sync";
 const DEBUG_LOG_KEY = "prairierunDebugLog";
-const defaultSettings = { prairieLearnOrigin: "https://us.prairielearn.com", completionThreshold: 95, defaultReminderMinutes: 10, notificationLeadMinutes: 240, showUndatedAssignments: false, assignmentView: "class" };
+const defaultSettings = { prairieLearnOrigin: "https://us.prairielearn.com", completionThreshold: 95, defaultReminderMinutes: 10, notificationLeadMinutes: 240, showUndatedAssignments: false, assignmentView: "class", syncIntervalMinutes: 60 };
 let scanInFlight = false;
 let dailySyncInFlight = false;
 let queuedScan = false;
@@ -442,7 +443,25 @@ PrairieRunExt.addRuntimeMessageListener((message, sender, sendResponse) => {
     return true;
   }
   if (message?.type === "PRAIRIERUN_GET_STATE") {
-    PrairieRunExt.storageLocalGet([ASSIGNMENTS_KEY, SYNC_KEY, SETTINGS_KEY]).then((stored) => sendResponse({ ok: true, assignments: stored[ASSIGNMENTS_KEY] || [], sync: stored[SYNC_KEY] || { state: "idle" }, settings: { ...defaultSettings, ...(stored[SETTINGS_KEY] || {}) } }));
+    PrairieRunExt.storageLocalGet([ASSIGNMENTS_KEY, SYNC_KEY, SETTINGS_KEY, "prairierunSourceStatus"]).then((stored) => {
+      let sources = [];
+      try {
+        sources = (globalThis.PrairieRunSources?.list?.() || []).map((adapter) => ({
+          id: adapter.id,
+          label: adapter.label,
+          origins: [...(adapter.origins || [])],
+          signInUrl: adapter.signInUrl,
+        }));
+      } catch { /* registry unavailable in some contexts; popup renders without labels */ }
+      sendResponse({ ok: true, assignments: stored[ASSIGNMENTS_KEY] || [], sync: stored[SYNC_KEY] || { state: "idle" }, settings: { ...defaultSettings, ...(stored[SETTINGS_KEY] || {}) }, sourceStatus: stored["prairierunSourceStatus"] || {}, sources });
+    }).catch((error) => sendResponse({ ok: false, error: error?.message || "Could not read extension state." }));
+    return true;
+  }
+  if (message?.type === "PRAIRIERUN_SYNC_NOW") {
+    debugLog("Manual background sync requested", { sources: message.sources || null });
+    runBackgroundSync("manual", Array.isArray(message.sources) ? message.sources : undefined)
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, error: error?.message || "Background sync failed." }));
     return true;
   }
 });
@@ -508,6 +527,54 @@ if (typeof globalThis !== "undefined") {
   globalThis.PrairieRunBackground.notifyHomeTab = typeof notifyHomeTab !== "undefined" ? notifyHomeTab : undefined;
 }
 
+// Multi-source background sync (PR 2): fetches and parses registered sources
+// on a schedule with no tab open. The tab-based PrairieLearn scan and the
+// daily Calendar alarm above stay untouched; PR 3 replaces the tab scan.
+async function ensureBackgroundSyncAlarm() {
+  try {
+    const settings = await getSettings();
+    const periodInMinutes = Number(settings.syncIntervalMinutes) || 60;
+    await PrairieRunExt.alarmsCreate?.(BACKGROUND_SYNC_ALARM, { periodInMinutes });
+    debugLog("Background sync alarm scheduled", { periodInMinutes });
+  } catch (error) {
+    debugLog("Could not schedule background synchronization", { error: error.message });
+  }
+}
+
+async function runBackgroundSync(reason, sources) {
+  if (!globalThis.PrairieRunOrchestrator?.runSync) {
+    debugLog("Background sync orchestrator unavailable", { reason });
+    return { ok: false, error: "Background sync is unavailable." };
+  }
+  try {
+    const summary = await globalThis.PrairieRunOrchestrator.runSync({ reason, sources });
+    debugLog("Background sync finished", { reason, skipped: summary?.skipped || null });
+    return { ok: true, summary };
+  } catch (error) {
+    debugLog("Background sync failed", { reason, error: error.message });
+    return { ok: false, error: error.message };
+  }
+}
+
+if (typeof globalThis !== "undefined") {
+  globalThis.PrairieRunBackground = globalThis.PrairieRunBackground || {};
+  globalThis.PrairieRunBackground.runBackgroundSync = runBackgroundSync;
+  globalThis.PrairieRunBackground.ensureBackgroundSyncAlarm = ensureBackgroundSyncAlarm;
+}
+
+try {
+  PrairieRunExt.addStartupListener?.(() => {
+    ensureBackgroundSyncAlarm().catch(() => undefined);
+    runBackgroundSync("startup").catch(() => undefined);
+  });
+  PrairieRunExt.addInstalledListener?.(() => {
+    ensureBackgroundSyncAlarm().catch(() => undefined);
+    runBackgroundSync("installed").catch(() => undefined);
+  });
+} catch (error) {
+  debugLog("Could not register startup listeners", { error: error.message });
+}
+
 PrairieRunExt.addStorageChangedListener((changes, areaName) => {
   const settingChange = changes[SETTINGS_KEY];
   if (areaName !== "local" || !settingChange) return;
@@ -519,9 +586,14 @@ PrairieRunExt.addStorageChangedListener((changes, areaName) => {
   if (oldSettings.notificationLeadMinutes !== newSettings.notificationLeadMinutes) {
     resyncStoredAssignments().catch((error) => debugLog("Could not resynchronize Calendar reminders", { error: error.message }));
   }
+  if (oldSettings.syncIntervalMinutes !== newSettings.syncIntervalMinutes) {
+    ensureBackgroundSyncAlarm().catch((error) => debugLog("Could not reschedule background sync", { error: error.message }));
+  }
 });
 
 PrairieRunExt.addAlarmsListener?.((alarm) => {
   if (alarm?.name === DAILY_CALENDAR_SYNC_ALARM) runDailyCalendarSync().catch((error) => debugLog("Daily Calendar alarm failed", { error: error.message }));
+  if (alarm?.name === BACKGROUND_SYNC_ALARM) runBackgroundSync("alarm").catch((error) => debugLog("Background sync alarm failed", { error: error.message }));
 });
 PrairieRunExt.alarmsCreate?.(DAILY_CALENDAR_SYNC_ALARM, { delayInMinutes: 24 * 60, periodInMinutes: 24 * 60 }).catch((error) => debugLog("Could not schedule daily Calendar synchronization", { error: error.message }));
+ensureBackgroundSyncAlarm().catch((error) => debugLog("Could not schedule background synchronization", { error: error.message }));
