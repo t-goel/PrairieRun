@@ -1,0 +1,9 @@
+{
+  "name": "prairierun-ical-relay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tiny relay that stores PrairieRun's auto-updating iCalendar feed on Vercel Blob.",
+  "dependencies": {
+    "@vercel/blob": "^1.0.0"
+  }
+}

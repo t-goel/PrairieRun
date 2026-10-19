@@ -61,6 +61,13 @@ Firefox Google OAuth client this requires. Pass `--gecko-id=` to
 `build-manifest.js` to stamp a permanent add-on ID you own before
 submitting to AMO.
 
+## iCalendar feed (no Google setup)
+
+The dashboard's **Calendar feed** card can host your deadlines as a single
+auto-updating `.ics` URL on a small Vercel relay (`../relay/`, deploy once
+with `vercel`): publish after every scan, subscribe from Apple Calendar,
+Google Calendar, or Outlook, no Google OAuth needed. See `../relay/README.md`.
+
 ## Google Calendar export
 
 The extension requests Calendar access via an explicit Connect step. Use the PrairieRun dashboard page (opened from the extension toolbar button) or the Connect button in the PrairieRun panel to connect or disconnect Google Calendar at any time. Disconnect revokes the token at `oauth2.googleapis.com/revoke` and clears the cached session token. Synchronization creates or reuses a `PrairieLearn — {class}` calendar and stores a private assignment marker plus Google event ID for duplicate-safe updates.

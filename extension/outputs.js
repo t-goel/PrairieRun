@@ -1,10 +1,17 @@
-// PrairieRun outputs fan-out (PR 1 stub; PR 9 owns internals).
+// PrairieRun outputs fan-out: after each successful source sync, push every
+// configured output. Today the only output is the auto-updating iCalendar
+// feed (PrairieRunRelay); later PRs own Google/gCal and file outputs.
 (function () {
   async function run(items, changes, settings) {
-    void items;
-    void changes;
-    void settings;
-    return {};
+    const results = {};
+    if (globalThis.PrairieRunRelay && typeof globalThis.PrairieRunRelay.autoPublish === "function") {
+      try {
+        results.relay = await globalThis.PrairieRunRelay.autoPublish(items, settings);
+      } catch (error) {
+        results.relay = { status: "error", error: error?.message || String(error) };
+      }
+    }
+    return results;
   }
 
   const api = { run };

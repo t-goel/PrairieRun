@@ -62,6 +62,27 @@ service worker, and has now been removed.
 See `systemdesign.md` for implementation evidence and `AGENTS.md` for current
 agent-facing project rules.
 
+## Current surfaces (dashboard era)
+
+- There is no toolbar popup. The toolbar button opens the full dashboard page
+  (`extension/options.html`) in a tab; sections render inside cards.
+- Sources card: one row per registered source with an enable switch. Disabled
+  sources read "off"; enabling a source first asks for its host permission
+  (the toggle click is the gesture) and then triggers an immediate background
+  sync so status becomes real right away. Rows offer Sign in (signed-out
+  state), Grant access (missing-permission state), and show per-source last
+  checked times in Central time.
+- Calendar feed card (first-class calendar path): configure a relay URL +
+  publish key once, and the feed auto-publishes after every successful sync.
+  The page shows the stable subscription URL with a copy button, Publish now,
+  and auto-update on/off. No Google Cloud Console work is ever part of
+  ordinary setup.
+- Google Calendar card (optional path): Connect/Disconnect remains available;
+  when the OAuth client is not configured on the device, the card says so and
+  points at the Calendar feed card instead of setup instructions.
+- Section chrome is headline-only; no subtitle or hint paragraphs under
+  headings.
+
 ## Product promise
 
 When an eligible assignment event is recreated after manual deletion, it uses

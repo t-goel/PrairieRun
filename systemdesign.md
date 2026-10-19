@@ -110,6 +110,26 @@ catch `AuthRequiredError` and set sync status `{ state: "auth_required",
 source: "google", current: "Connect Google Calendar to sync." }` instead of a
 per-assignment failure. The dashboard page renders that state with a Connect button.
 
+## Hosted iCal feed (first-class calendar path)
+
+`extension/options.html` configures a feed under `prairierunSettings.relay`
+(`{ enabled, relayUrl, feedId }`) with the publish secret in
+`prairierunSecrets.relayPublishKey`; push state lives in
+`prairierunRelayStatus` (`{ state, url, publishedAt, hash }`). After every
+successful source sync, `sync-orchestrator.js` calls
+`PrairieRunOutputs.run`, which delegates to
+`PrairieRunRelay.autoPublish`: when the feed is enabled, the relay origin has
+been granted as an optional host permission, and the ICS content actually
+changed (hash ignores `DTSTAMP`/`LAST-MODIFIED` lines so unchanged content is
+not re-uploaded), `relay-push.js` POSTs the full ICS built by
+`PrairieRunIcsWriter` (sharing `prairierunIcsSequences` with manual exports
+for stable UIDs) to `<relayUrl>/api/publish` and stores the returned stable
+Blob URL. The bundled `relay/` directory is the Vercel scaffold for that
+relay (`api/publish.js`, key-gated, permissive CORS so the options page can
+publish directly without a host permission; background auto-publish uses the
+granted origin). Users subscribe to the URL in any calendar app, which keeps
+due dates current with no Google OAuth involvement.
+
 ## Multi-source scaffold (PR 1, no behavior change)
 
 PR 1 adds the `DeadlineItem` normalized model (`extension/deadline-model.js`,

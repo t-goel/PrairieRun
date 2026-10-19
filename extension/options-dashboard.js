@@ -78,7 +78,9 @@ function renderAuthStatus(status = {}) {
     authStatusElement.textContent = "Not connected.";
     if (authConnectButton) authConnectButton.hidden = true;
     if (authDisconnectButton) authDisconnectButton.hidden = true;
-    showAuthError("The Google OAuth client ID is not configured. See extension/google-calendar-setup.md.", true);
+    // The direct-sync OAuth client is intentionally device-specific setup;
+    // the Calendar feed card is the no-config path, so point there.
+    showAuthError("Direct Google sync is not set up on this device. Use the Calendar feed card above — it needs no setup.", true);
     return;
   }
   if (status.connected) {
@@ -102,6 +104,26 @@ function showAuthError(text, isError) {
 
 // ---- Multi-source status ----
 
+function renderSources() {
+  if (!sourcesListElement) return;
+  sourcesListElement.textContent = "";
+  if (!cachedSources.length) {
+    showSyncStatus("No sources registered.");
+    return;
+  }
+  showSyncStatus("");
+  for (const source of cachedSources) {
+    const entry = cachedSourceStatus[source.id];
+    rowForSource(source, entry);
+  }
+}
+
+function sourceEnabled(source) {
+  const entry = settings?.sources?.[source.id];
+  if (entry && typeof entry.enabled === "boolean") return entry.enabled;
+  return source.id === "prairielearn";
+}
+
 function chipFor(entry) {
   if (!entry) return { text: "pending", className: "pending", action: null };
   if (entry.status === "ok") return { text: "ok", className: "ok", action: null };
@@ -111,6 +133,125 @@ function chipFor(entry) {
   }
   if (entry.status === "disabled") return { text: "disabled", className: "disabled", action: null };
   return { text: "error", className: "error", action: null };
+}
+
+function rowForSource(source, entry) {
+  const enabled = sourceEnabled(source);
+  const chip = enabled ? chipFor(entry) : { text: "off", className: "disabled", action: null };
+  const row = document.createElement("li");
+  row.className = "source-row";
+
+  const toggle = document.createElement("input");
+  toggle.type = "checkbox";
+  toggle.className = "source-toggle";
+  toggle.checked = enabled;
+  toggle.setAttribute("aria-label", `Include ${source.label || source.id} scans`);
+  toggle.addEventListener("change", () => toggleSource(source, toggle));
+  row.appendChild(toggle);
+
+  const info = document.createElement("div");
+  info.className = "source-info";
+  const label = document.createElement("span");
+  label.className = "source-label";
+  label.textContent = source.label || source.id;
+  info.appendChild(label);
+  const status = document.createElement("span");
+  status.className = "source-checked";
+  status.textContent = !enabled
+    ? "off"
+    : entry?.error && entry.status !== "signed_out" && entry.status !== "disabled"
+      ? entry.error
+      : formatCentralCheckedAt(entry?.checkedAt);
+  info.appendChild(status);
+  row.appendChild(info);
+
+  const badge = document.createElement("span");
+  badge.className = `chip ${chip.className}`;
+  badge.textContent = chip.text;
+  row.appendChild(badge);
+
+  if (chip.action === "signin" && (source.signInUrl || entry?.signInUrl)) {
+    const button = document.createElement("button");
+    button.className = "secondary source-action";
+    button.textContent = "Sign in";
+    button.addEventListener("click", () => {
+      PrairieRunExt.tabsCreateForeground(source.signInUrl || entry.signInUrl).catch((error) => showStatus(error.message, true));
+    });
+    row.appendChild(button);
+  }
+  if (chip.action === "grant") {
+    const button = document.createElement("button");
+    button.className = "secondary source-action";
+    button.textContent = "Grant access";
+    // This click counts as the user gesture the permissions API requires.
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        await grantSourcePermission(source);
+      } catch (error) {
+        showStatus(error.message, true);
+      } finally {
+        button.disabled = false;
+        refreshState();
+      }
+    });
+    row.appendChild(button);
+  }
+  sourcesListElement.appendChild(row);
+}
+
+async function grantSourcePermission(source) {
+  if (!source.origins?.length) return false;
+  try {
+    return await PrairieRunExt.permissionsRequest(source.origins);
+  } catch {
+    return false;
+  }
+}
+
+async function toggleSource(source, toggle) {
+  const want = toggle.checked;
+  const save = async () => {
+    const stored = (await PrairieRunExt.storageLocalGet("prairierunSettings")) || {};
+    const current = stored.prairierunSettings && typeof stored.prairierunSettings === "object"
+      ? stored.prairierunSettings
+      : {};
+    const sources = current.sources && typeof current.sources === "object" ? { ...current.sources } : {};
+    sources[source.id] = { ...(sources[source.id] || {}), enabled: want };
+    await PrairieRunExt.storageLocalSet({ prairierunSettings: { ...current, sources } });
+  };
+
+  // Enabling a source first needs its host permission; the toggle click is
+  // the user gesture that lets us ask.
+  if (want && source.origins?.length) {
+    let granted = true;
+    try {
+      granted = await PrairieRunExt.permissionsContains(source.origins);
+    } catch {
+      granted = true;
+    }
+    if (!granted) {
+      granted = await grantSourcePermission(source);
+      if (!granted) {
+        // The permission prompt was dismissed; the toggle stays off. A later
+        // sync attempt records disabled:permission, which surfaces the
+        // permanent "Grant access" affordance on the row.
+        toggle.checked = false;
+        showStatus(`${source.label || source.id} needs browser permission to scan. Grant access to enable it.`, true);
+        return;
+      }
+    }
+  }
+  try {
+    await save();
+  } catch (error) {
+    toggle.checked = !want;
+    showStatus(error.message || "Could not save the source setting.", true);
+    return;
+  }
+  refreshState();
+  // Kick an immediate check so the row's status becomes real right away.
+  syncNowButton?.click();
 }
 
 function formatCentralCheckedAt(checkedAt) {
@@ -127,68 +268,6 @@ function formatCentralCheckedAt(checkedAt) {
     }).format(date);
   } catch {
     return date.toLocaleString();
-  }
-}
-
-function renderSources() {
-  if (!sourcesListElement) return;
-  sourcesListElement.textContent = "";
-  if (!cachedSources.length) {
-    showSyncStatus("No sources registered.");
-    return;
-  }
-  showSyncStatus("");
-  for (const source of cachedSources) {
-    const entry = cachedSourceStatus[source.id];
-    const chip = chipFor(entry);
-    const row = document.createElement("li");
-    row.className = "source-row";
-
-    const info = document.createElement("div");
-    info.className = "source-info";
-    const label = document.createElement("span");
-    label.className = "source-label";
-    label.textContent = source.label || source.id;
-    info.appendChild(label);
-    const checked = document.createElement("span");
-    checked.className = "source-checked";
-    checked.textContent = formatCentralCheckedAt(entry?.checkedAt);
-    info.appendChild(checked);
-    row.appendChild(info);
-
-    const badge = document.createElement("span");
-    badge.className = `chip ${chip.className}`;
-    badge.textContent = chip.text;
-    row.appendChild(badge);
-
-    if (chip.action === "signin" && source.signInUrl) {
-      const button = document.createElement("button");
-      button.className = "secondary source-action";
-      button.textContent = `Sign in to ${source.label || source.id}`;
-      button.addEventListener("click", () => {
-        PrairieRunExt.tabsCreateForeground(source.signInUrl).catch((error) => showStatus(error.message, true));
-      });
-      row.appendChild(button);
-    }
-    if (chip.action === "grant") {
-      const button = document.createElement("button");
-      button.className = "secondary source-action";
-      button.textContent = "Grant access";
-      // This click counts as the user gesture the permissions API requires.
-      button.addEventListener("click", async () => {
-        button.disabled = true;
-        try {
-          await PrairieRunExt.permissionsRequest(source.origins || []);
-        } catch (error) {
-          showStatus(error.message, true);
-        } finally {
-          button.disabled = false;
-          refreshState();
-        }
-      });
-      row.appendChild(button);
-    }
-    sourcesListElement.appendChild(row);
   }
 }
 

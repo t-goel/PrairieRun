@@ -24,14 +24,22 @@ PrairieLearn page
       -> home-panel.js            (embedded display/edit surface)
       -> view-utils.js            (shared filtering/sorting/status helpers)
 
-Options page (dashboard) -> background.js
-           -> scans course assessment tabs
+Dashboard page (options.html) -> background.js
+           -> scans course assessment tabs (background.js)
+           -> fetches enabled sources (sync-orchestrator.js)
            -> stores normalized assignment state
-           -> invokes calendar.js
+           -> invokes outputs.js -> relay-push.js (iCal feed publish)
            -> notifies the home panel
 
-calendar.js -> Google Calendar API
+calendar.js -> Google Calendar API (optional direct sync)
+relay/      -> Vercel relay that hosts the auto-updating iCal feed
 ```
+
+`extension/options.html` is the full dashboard page (no popup). The toolbar
+button opens it via `action.onClicked` (`PrairieRunExt
+.addActionClickedListener`); `options-dashboard.js` drives settings, auth,
+source rows, and Sync now; section scripts render Canvas, course links,
+export, and the Calendar feed card.
 
 `extension/background.js` imports `extension/oauth-config.js`,
 `extension/auth-utils.js`, then `extension/calendar.js`; `calendar.js` is a
@@ -85,11 +93,25 @@ per-project change). `auth-utils.js` is the pure error-classification helper
 - Do not reintroduce per-assignment checkboxes, deselect-all controls, or manual
   selection/export UX unless explicitly requested.
 - Only assignments with due dates are eligible for Google Calendar sync.
+- Sources are default-off except PrairieLearn. The dashboard Sources card owns
+  the per-source enable toggles, host-permission grants, and sign-in actions
+  (toggle click is the permission gesture, then an immediate sync runs);
+  disabled sources must show "off", never "pending".
 - Assignments without due dates are hidden by default, but users can reveal
   them and add/edit a due date.
 - If a due date is added to a previously undated assignment, it becomes eligible
   for sync.
 - Calendar events should be one-hour blocks ending at the assignment due date.
+- The hosted iCal feed (Calendar feed card + the `relay/` Vercel scaffold) is
+  the first-class, no-setup calendar integration: the extension publishes the
+  full ICS after every successful sync via `outputs.js` -> `relay-push.js`
+  (`prairierunSettings.relay`, `prairierunSecrets.relayPublishKey`,
+  `prairierunRelayStatus`), and the feed URL is the subscription target for
+  any calendar app. Never send users through Google Cloud Console as part of
+  normal setup.
+- Direct Google Calendar sync (OAuth) stays optional; when its client is not
+  configured, the dashboard points users at the Calendar feed card instead of
+  setup instructions.
 - Only sync new assignments or materially changed assignments.
 - Every successful page scan also checks marked Calendar events for missing
   copies or duplicates. Those are repair work even when assignment data is
@@ -236,6 +258,13 @@ in parallel without touching shared files. No user-visible behavior change.
 - `extension/offscreen.html` / `extension/offscreen.js`: PR 2 owns.
 - `extension/options.html` + `options.js/css` + `options-canvas/courses/export/
   output/relay.js`: "Coming soon" stubs. Later PRs own each section.
+- Extra early-owned surfaces (with the owner's approval): `relay-push.js`
+  (PR 11 content) and `outputs.js` (PR 9 content) are live now — the hosted
+  iCal feed publishes after every sync — plus `options-dashboard.js`
+  (replaces the removed popup) and `options-feed.js` (Calendar feed card).
+- `relay/`: self-contained Vercel relay scaffold hosting the feed
+  (`relay/api/publish.js` + Blob storage). Deployed separately; see
+  `relay/README.md`.
 - Background load order (`importScripts` + `FIREFOX_BACKGROUND_SCRIPTS`):
   `compat.js`, `oauth-config.js`, `auth-utils.js`, `deadline-model.js`,
   `source-registry.js`, `net.js`, `parse-host.js`, `prairielearn-adapter.js`,

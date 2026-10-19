@@ -1,5 +1,13 @@
 # Google Calendar setup for PrairieRun
 
+Use the built-in iCal feed for ordinary setup: the dashboard's **Calendar
+feed** card hosts an auto-updating subscription URL on one `vercel` deploy of
+the `relay/` directory — no Google Cloud project, no OAuth client, no
+redirect URIs. This document only matters for the optional direct Google
+Calendar write path below.
+
+## Google Calendar direct-sync setup (optional)
+
 PrairieLearn scanning and the embedded assignment panel work without Google OAuth. Calendar sync needs a Google Cloud (GCP) project you own with the Calendar API enabled.
 
 Decision: use a new PrairieRun GCP project owned by the current maintainer (not the original author's project). End users never touch this setup; they install the extension and click Connect.
