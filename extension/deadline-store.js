@@ -427,7 +427,7 @@
     return { items, changes: diffChanges(prevById, items), nearMisses };
   }
 
-  const api = { mergeSourceResults, suggestCourseLinks, dedupe, normTitle, normalizeCourseCode };
+  const api = { mergeSourceResults, suggestCourseLinks, dedupe, normTitle, normalizeCourseCode, familyMapOf };
   globalThis.PrairieRunDeadlineStore = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })();

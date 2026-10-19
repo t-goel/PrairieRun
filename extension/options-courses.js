@@ -21,19 +21,42 @@
   }
 
   // Stored links may use the legacy spaced key format ("CS 425"); re-key them
-  // through the current normalizer so old rows merge with suggested family
-  // buckets and the confirmed checkbox carries over.
+  // through the current normalizer and fold same-family keys into the family's
+  // shortest code, so old separate rows ("CS 498", "CS 498DK") collapse into
+  // the one suggested family bucket ("CS498") and keep any confirmed state.
   function migrateStoredLinks(rawLinks) {
     const store = globalThis.PrairieRunDeadlineStore;
     if (!rawLinks || typeof rawLinks !== "object") return {};
     const normalize = store && typeof store.normalizeCourseCode === "function";
-    const migrated = {};
+    const normalized = {};
     for (const [key, entry] of Object.entries(rawLinks)) {
-      const normalized = normalize ? store.normalizeCourseCode(key) : key;
-      if (!normalized) continue;
-      const target = migrated[normalized];
+      const code = normalize ? store.normalizeCourseCode(key) : key;
+      if (!code) continue;
+      const existing = normalized[code];
+      if (!existing) {
+        normalized[code] = { ...entry };
+        continue;
+      }
+      const merged = { ...existing };
+      for (const [source, keys] of Object.entries(entry)) {
+        if (Array.isArray(keys)) {
+          merged[source] = [...new Set([...(Array.isArray(existing[source]) ? existing[source] : []), ...keys])];
+        }
+      }
+      merged.confirmed = existing.confirmed === true || entry.confirmed === true;
+      normalized[code] = merged;
+    }
+    const codes = Object.keys(normalized);
+    if (!codes.length) return {};
+    const family = store && typeof store.familyMapOf === "function"
+      ? store.familyMapOf(codes)
+      : null;
+    const migrated = {};
+    for (const [code, entry] of Object.entries(normalized)) {
+      const bucketCode = family ? family.get(code) || code : code;
+      const target = migrated[bucketCode];
       if (!target) {
-        migrated[normalized] = entry;
+        migrated[bucketCode] = { ...entry };
         continue;
       }
       const merged = { ...target };
@@ -43,7 +66,7 @@
         }
       }
       merged.confirmed = target.confirmed === true || entry.confirmed === true;
-      migrated[normalized] = merged;
+      migrated[bucketCode] = merged;
     }
     return migrated;
   }
@@ -209,7 +232,7 @@
     });
   }
 
-  const api = { render };
+  const api = { render, migrateStoredLinks };
   globalThis.PrairieRunOptionsCourses = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })();
