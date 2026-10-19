@@ -133,6 +133,7 @@ button.source-action { width: 100%; padding: 6px 10px; font-size: 11px; }
   font-size: 13px;
   margin-top: 8px;
 }
+.prr-calendar-icon { display: inline-block; vertical-align: -2px; margin-right: 5px; flex-shrink: 0; }
 .prr-feed-actions button { margin: 10px 8px 0 0; width: auto; padding: 8px 14px; }
 .prr-feed-config { margin-top: 10px; }
 .prr-feed-config button { margin: 10px 0 0; }

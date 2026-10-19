@@ -83,6 +83,52 @@
     await ext().storageLocalSet({ [SECRETS_KEY]: next });
   }
 
+  function makeCalendarIcon() {
+    if (typeof document === "undefined") return null;
+    const create = typeof document.createElementNS === "function"
+      ? (tag) => document.createElementNS("http://www.w3.org/2000/svg", tag)
+      : (tag) => document.createElement(tag);
+    const svg = create("svg");
+    svg.setAttribute("class", "prr-calendar-icon");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("width", "13");
+    svg.setAttribute("height", "13");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "1.5");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("aria-hidden", "true");
+
+    const rect = create("rect");
+    rect.setAttribute("x", "2");
+    rect.setAttribute("y", "3");
+    rect.setAttribute("width", "12");
+    rect.setAttribute("height", "11");
+    rect.setAttribute("rx", "2");
+
+    const line1 = create("line");
+    line1.setAttribute("x1", "2");
+    line1.setAttribute("y1", "7");
+    line1.setAttribute("x2", "14");
+    line1.setAttribute("y2", "7");
+
+    const line2 = create("line");
+    line2.setAttribute("x1", "5");
+    line2.setAttribute("y1", "1.5");
+    line2.setAttribute("x2", "5");
+    line2.setAttribute("y2", "3.5");
+
+    const line3 = create("line");
+    line3.setAttribute("x1", "11");
+    line3.setAttribute("y1", "1.5");
+    line3.setAttribute("x2", "11");
+    line3.setAttribute("y2", "3.5");
+
+    svg.append(rect, line1, line2, line3);
+    return svg;
+  }
+
   function formatPublishedAt(timestamp) {
     if (!timestamp) return "";
     const date = new Date(timestamp);
@@ -327,7 +373,10 @@
         if (state?.state === "error" && state?.error) {
           statusLine.textContent = state.error;
         } else if (state?.publishedAt) {
-          statusLine.textContent = `Feed up to date. Last published ${formatPublishedAt(state.publishedAt)}.`;
+          statusLine.textContent = "";
+          const icon = makeCalendarIcon();
+          if (icon) statusLine.appendChild(icon);
+          statusLine.appendChild(document.createTextNode(formatPublishedAt(state.publishedAt)));
         } else {
           statusLine.textContent = "Feed on. Publishes after every scan.";
         }
@@ -347,7 +396,7 @@
     });
   }
 
-  const api = { render, normalizeRelayUrl };
+  const api = { render, normalizeRelayUrl, formatPublishedAt, makeCalendarIcon };
   globalThis.PrairieRunOptionsFeed = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })();

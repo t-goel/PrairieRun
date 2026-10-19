@@ -198,3 +198,38 @@ test("outputs.run fans the relay auto-publish into every sync", async () => {
   assert.equal(results.relay.ok, true);
   assert.equal(env.store.get("prairierunRelayStatus").state, "ok");
 });
+
+test("formatPublishedAt formats timestamp into America/Chicago date-time without status prefixes", () => {
+  const ts = new Date("2026-10-19T22:45:00Z").getTime();
+  const formatted = optionsFeed.formatPublishedAt(ts);
+  assert.match(formatted, /Oct 19.*5:45\s*PM/i);
+  assert.ok(!formatted.includes("Feed up to date"));
+  assert.ok(!formatted.includes("Last published"));
+});
+
+test("makeCalendarIcon creates an accessible inline SVG calendar icon", () => {
+  const prevDoc = global.document;
+  try {
+    const createdElements = [];
+    global.document = {
+      createElementNS: (_ns, tag) => {
+        const el = {
+          tag,
+          attrs: {},
+          children: [],
+          setAttribute: (k, v) => { el.attrs[k] = String(v); },
+          append: (...args) => el.children.push(...args),
+        };
+        createdElements.push(el);
+        return el;
+      },
+    };
+    const icon = optionsFeed.makeCalendarIcon();
+    assert.equal(icon.tag, "svg");
+    assert.equal(icon.attrs.class, "prr-calendar-icon");
+    assert.equal(icon.attrs["aria-hidden"], "true");
+    assert.equal(icon.children.length, 4);
+  } finally {
+    global.document = prevDoc;
+  }
+});
