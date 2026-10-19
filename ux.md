@@ -4,9 +4,10 @@
 
 This audit records implementation findings after the cleanup completed on
 2026-09-11. The current product surface is the PrairieLearn home-page panel plus
-the extension popup. The standalone staging page was not linked by the current
-manifest, popup, content script, or background service worker, and has now been
-removed.
+the full-page dashboard (`extension/options.html`); there is no toolbar popup,
+and the toolbar button opens the dashboard page directly. The standalone staging
+page was not linked by the current manifest, content script, or background
+service worker, and has now been removed.
 
 ### UX code that is no longer represented in the current product
 
@@ -19,8 +20,11 @@ removed.
   “deselect all,” or manual sync controls in the extension. Historical planning
   text in this file and the stage documents should be treated as design history,
   not as current requirements.
-- The popup stylesheet's obsolete `.stats` rules and the unreachable `#status`
-  fallback have been removed. The popup now uses `#context` consistently.
+- The popup was removed in favor of the full-page dashboard; the popup
+  stylesheet and controller (`popup.html`/`popup.css`/`popup.js`) were replaced
+  by `options.html` / `options.css` / `options-dashboard.js`. The dashboard
+  keeps the same message contract and `#context` / settings / auth / sources /
+  `#sync-status` element conventions.
 - The home-panel stylesheet's obsolete `.prr-sync--done` and
   `.prr-check-spacer` rules have been removed.
 
@@ -28,7 +32,8 @@ removed.
 
 - The home panel remains directly below PrairieLearn's course links.
 - Automatic scanning and automatic calendar synchronization remain the default.
-- The extension popup does not offer a manual scan action. Opening or
+- The dashboard page does not trigger scans on its own beyond the approved
+  "Sync now" button. Opening or
   refreshing the PrairieLearn home page starts the scan automatically.
 - Calendar synchronization runs after the first successful scan and is also
   reconciled at least once every 24 hours, even when assignments are unchanged.
@@ -45,7 +50,7 @@ removed.
 - Calendar links, class-specific calendars, completion state, duplicate
   prevention, and the strict-greater-than-95% (not equal to 95%) completion rule
   must not regress.
-- Google Connect/Disconnect stays understandable: popup card plus a one-line
+- Google Connect/Disconnect stays understandable: dashboard card plus a one-line
   home-panel footer, `Not connected` / `Connected, expires <time>` status,
   distinct cancellation vs. misconfiguration messages, and a collapsed
   copy-redirect-URI troubleshooter. No client-ID settings field in the UI.
@@ -63,7 +68,7 @@ When an eligible assignment event is recreated after manual deletion, it uses
 the current completion color and reminders. Deleted Google event IDs are
 handled explicitly so restoration does not silently fail on an ID conflict.
 Refreshing PrairieLearn checks for externally deleted assignment events and
-restores them during the same scan. The popup reports the number restored.
+restores them during the same scan. The dashboard page reports the number restored.
 Healthy unchanged events are checked without being rewritten. Removing an
 assignment's date in PrairieRun still excludes it from Calendar sync.
 
@@ -77,9 +82,9 @@ Personal events and assignments with merely similar titles are left alone.
 
 Reloading this update and opening PrairieLearn triggers the initial duplicate
 repair automatically. There is no need to clear data or delete calendars.
-The popup reports failed assignments so a partial repair is not shown as a
+The dashboard page reports failed assignments so a partial repair is not shown as a
 successful synchronization.
-During Calendar writes the popup says "Synchronizing Google Calendar…" and
+During Calendar writes the page says "Synchronizing Google Calendar…" and
 updates live. Completed repairs report how many duplicate events were removed;
 Google sign-in or a completed page scan alone does not mean repair succeeded.
 This source-link repair runs again after updating, even if the earlier repair
@@ -90,7 +95,7 @@ history, PrairieRun automatically verifies original links from old Calendar
 events against the logged-in PrairieLearn session. Users do not need to enter
 each pair manually. Unsupported redirects or login failures leave the events
 alone; titles alone never authorize deleting Calendar events.
-The popup completion control says "Complete above" the threshold to make the
+The dashboard completion control says "Complete above" the threshold to make the
 strict comparison clear; exactly 95% is incomplete at the default threshold.
 
 Multiple attempts at one assessment appear as one assignment. A completed

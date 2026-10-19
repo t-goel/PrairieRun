@@ -167,7 +167,7 @@ test("firefox manifest swaps in a scripts-array background and the gecko identit
     assert.deepEqual(background, { scripts: ["compat.js", "oauth-config.js", "auth-utils.js", "deadline-model.js", "source-registry.js", "net.js", "parse-host.js", "prairielearn-adapter.js", "identity-resolver.js", "source-prairielearn.js", "source-canvas.js", "source-gradescope.js", "source-prairietest.js", "ics-parse.js", "ics-writer.js", "deadline-store.js", "outputs.js", "relay-push.js", "calendar.js", "sync-orchestrator.js", "background.js"] });
     assert.equal(browser_specific_settings.gecko.strict_min_version, "115.0");
     assert.match(browser_specific_settings.gecko.id, /@/);
-    for (const file of ["compat.js", "oauth-config.js", "auth-utils.js", "deadline-model.js", "source-registry.js", "calendar.js", "background.js", "content.js", "home-panel.js", "popup.js", "options.html"]) {
+    for (const file of ["compat.js", "oauth-config.js", "auth-utils.js", "deadline-model.js", "source-registry.js", "calendar.js", "background.js", "content.js", "home-panel.js", "options-dashboard.js", "options.html"]) {
       assert.ok(fs.existsSync(path.join(outDir, file)), `dist ships ${file}`);
     }
   } finally {

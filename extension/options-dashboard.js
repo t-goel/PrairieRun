@@ -1,3 +1,7 @@
+// PrairieRun dashboard controller: drives the full-page options.html surface
+// (settings, Google Calendar auth, source status, Sync now). Lives on the
+// same message contract as the removed popup (PRAIRIERUN_GET_STATE /
+// PRAIRIERUN_AUTH_* / PRAIRIERUN_SYNC_NOW).
 const contextElement = document.querySelector("#context");
 const notificationLeadElement = document.querySelector("#notification-lead-hours");
 const completionThresholdElement = document.querySelector("#completion-threshold");
@@ -17,8 +21,14 @@ let cachedSources = [];
 let cachedSourceStatus = {};
 
 function showStatus(text, error = false) {
+  contextElement.hidden = !text;
   contextElement.textContent = text;
   contextElement.classList.toggle("error", error);
+}
+function showSyncStatus(text, error = false) {
+  syncStatusElement.hidden = !text;
+  syncStatusElement.textContent = text;
+  syncStatusElement.classList.toggle("error", error);
 }
 function applySettings(nextSettings = {}) {
   settings = { ...settings, ...nextSettings };
@@ -33,11 +43,10 @@ function saveSettings() {
 function sendRuntimeMessage(message, timeoutMs = 10000) {
   return Promise.race([
     PrairieRunExt.runtimeSendMessage(message),
-    new Promise((_, reject) => setTimeout(() => reject(new Error("PrairieRun background scanner did not respond. Reload the extension and try again.")), timeoutMs)),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("PrairieRun background did not respond. Reload the extension and try again.")), timeoutMs)),
   ]);
 }
 function refreshState() {
-  console.log("[PrairieRun] Popup refreshing state");
   sendRuntimeMessage({ type: "PRAIRIERUN_GET_STATE" }).then((response) => {
     if (!response?.ok) return;
     applySettings(response.settings);
@@ -45,10 +54,10 @@ function refreshState() {
     cachedSourceStatus = response.sourceStatus || {};
     renderSources();
     if (response.sync?.state === "scanning") showStatus(`${response.sync.current || "Scanning…"} (${response.sync.found || 0} found)`);
-    if (response.sync?.state === "syncing") showStatus(response.sync.current || "Synchronizing Google Calendar…");
-    if (response.sync?.state === "complete") showStatus(response.sync.current || "PrairieLearn detected.");
-    if (response.sync?.state === "auth_required") showStatus(response.sync.current || "Connect Google Calendar to sync.");
-    if (response.sync?.state === "error") showStatus(response.sync.current || "Scan failed.", true);
+    else if (response.sync?.state === "syncing") showStatus(response.sync.current || "Synchronizing Google Calendar…");
+    else if (response.sync?.state === "auth_required") showStatus(response.sync.current || "Connect Google Calendar to sync.", true);
+    else if (response.sync?.state === "error") showStatus(response.sync.current || "Sync failed.", true);
+    else showStatus("");
   }).catch((error) => showStatus(error.message, true));
 }
 function refreshAuthStatus() {
@@ -90,12 +99,8 @@ function showAuthError(text, isError) {
   authErrorElement.textContent = text || "";
   authErrorElement.classList.toggle("error", Boolean(isError));
 }
-function monitorRefresh(attempt = 0) {
-  refreshState();
-  if (attempt < 120) setTimeout(() => monitorRefresh(attempt + 1), 500);
-}
 
-// ---- Multi-source status (PR 2) ----
+// ---- Multi-source status ----
 
 function chipFor(entry) {
   if (!entry) return { text: "pending", className: "pending", action: null };
@@ -129,10 +134,10 @@ function renderSources() {
   if (!sourcesListElement) return;
   sourcesListElement.textContent = "";
   if (!cachedSources.length) {
-    if (syncStatusElement) syncStatusElement.textContent = "No sources registered.";
+    showSyncStatus("No sources registered.");
     return;
   }
-  if (syncStatusElement) syncStatusElement.textContent = "Last checked (Central):";
+  showSyncStatus("");
   for (const source of cachedSources) {
     const entry = cachedSourceStatus[source.id];
     const chip = chipFor(entry);
@@ -190,29 +195,28 @@ function renderSources() {
 function runManualSync() {
   if (!syncNowButton) return;
   syncNowButton.disabled = true;
-  if (syncStatusElement) syncStatusElement.textContent = "Syncing…";
+  showSyncStatus("Syncing…");
   sendRuntimeMessage({ type: "PRAIRIERUN_SYNC_NOW" }, 120000).then((response) => {
     syncNowButton.disabled = false;
     if (!response?.ok) {
-      if (syncStatusElement) syncStatusElement.textContent = response?.error || "Sync failed.";
+      showSyncStatus(response?.error || "Sync failed.", true);
       return;
     }
-    const summary = response.summary || {};
-    if (summary.skipped === "locked" && syncStatusElement) {
-      syncStatusElement.textContent = "A sync is already running.";
-    }
+    if (response.summary?.skipped === "locked") showSyncStatus("A sync is already running.");
+    else showSyncStatus("");
     refreshState();
   }).catch((error) => {
     syncNowButton.disabled = false;
-    if (syncStatusElement) syncStatusElement.textContent = error.message;
+    showSyncStatus(error.message, true);
   });
 }
 
 if (syncNowButton) syncNowButton.addEventListener("click", runManualSync);
 
-PrairieRunExt.tabsQuery({ active: true, currentWindow: true }).then(([tab]) => {
-  contextElement.textContent = tab?.url?.startsWith("https://us.prairielearn.com/") ? "PrairieLearn detected." : "Open us.prairielearn.com to scan assignments.";
-}).catch(() => undefined);
+function monitorRefresh(attempt = 0) {
+  refreshState();
+  if (attempt < 120) setTimeout(() => monitorRefresh(attempt + 1), 500);
+}
 
 refreshState();
 refreshAuthStatus();
@@ -245,7 +249,7 @@ completionThresholdElement.addEventListener("change", async () => {
   }
   settings.completionThreshold = Math.round(threshold);
   await saveSettings();
-  contextElement.textContent = "Refreshing assignments…";
+  showStatus("Refreshing assignments…");
   monitorRefresh();
 });
 

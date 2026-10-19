@@ -126,11 +126,6 @@
       const items = Array.isArray(stored[DEADLINES_KEY]) ? stored[DEADLINES_KEY] : [];
       const settings = stored[SETTINGS_KEY] || {};
 
-      const desc = document.createElement("p");
-      desc.className = "muted";
-      desc.textContent = "Download your assignments and exams as an iCalendar (.ics) file for Apple Calendar, Outlook, or Google Calendar.";
-      root.appendChild(desc);
-
       const btnContainer = document.createElement("div");
       btnContainer.className = "prr-export-buttons";
       btnContainer.style.display = "flex";

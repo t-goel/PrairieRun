@@ -18,7 +18,7 @@
 - Shows the next three uncompleted assignments, with additional upcoming work and completed work in separate dropdowns.
 - Uses PrairieLearn completion status and the strict-greater-than-95% score rule.
 - Sorts incomplete assignments first and puts completed assignments in a dropdown.
-- Adds a Google Calendar popup reminder to each uncompleted assignment; the default lead time is four hours and can be changed in the extension popup. Completed assignments have reminders removed.
+- Adds a Google Calendar popup reminder to each uncompleted assignment; the default lead time is four hours and can be changed on the PrairieRun dashboard page. Completed assignments have reminders removed.
 - Keeps undated assignments hidden by default, with an extension setting to reveal them.
 - Lets the user add or edit a due date for an undated assignment from the embedded panel.
 - Previews one-hour calendar blocks ending at the due time.
@@ -35,7 +35,7 @@
 ## Firefox (same codebase, generated manifest)
 
 The extension runs in Firefox 121+ with full functionality: PrairieLearn
-scan, embedded home panel, popup, and automatic Google Calendar sync. The
+scan, embedded home panel, dashboard page, and automatic Google Calendar sync. The
 only per-browser delta is the manifest, generated from
 `extension/manifest.base.json`:
 
@@ -63,7 +63,7 @@ submitting to AMO.
 
 ## Google Calendar export
 
-The extension requests Calendar access via an explicit Connect step. Use the extension popup (or the Connect button in the PrairieRun panel) to connect or disconnect Google Calendar at any time. Disconnect revokes the token at `oauth2.googleapis.com/revoke` and clears the cached session token. Synchronization creates or reuses a `PrairieLearn — {class}` calendar and stores a private assignment marker plus Google event ID for duplicate-safe updates.
+The extension requests Calendar access via an explicit Connect step. Use the PrairieRun dashboard page (opened from the extension toolbar button) or the Connect button in the PrairieRun panel to connect or disconnect Google Calendar at any time. Disconnect revokes the token at `oauth2.googleapis.com/revoke` and clears the cached session token. Synchronization creates or reuses a `PrairieLearn — {class}` calendar and stores a private assignment marker plus Google event ID for duplicate-safe updates.
 
 Background runs never open a Google window: without a cached session token, automatic scans and the daily alarm record `auth_required` ("Connect Google Calendar to sync.") and wait for the user to Connect. Only the Connect button uses interactive auth.
 

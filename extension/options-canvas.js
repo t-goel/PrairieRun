@@ -102,8 +102,6 @@
     const enableLabel = make("label", {});
     const enableBox = make("input", { type: "checkbox", "data-pr-canvas-enabled": "1" });
     enableLabel.append(enableBox, document.createTextNode(" Enable Canvas"));
-    const enableHint = make("p", { className: "muted" },
-      "Reads your Canvas calendar feed. Enabling requests permission for https://canvas.illinois.edu/*.");
 
     const savedLine = make("p", { className: "muted", "data-pr-canvas-saved": "1" });
     const feedInput = make("input", {
@@ -122,10 +120,8 @@
     const plannerLabel = make("label", {});
     const plannerBox = make("input", { type: "checkbox", "data-pr-canvas-planner": "1" });
     plannerLabel.append(plannerBox, document.createTextNode(" Use Canvas session for submission status (planner API)"));
-    const plannerHint = make("p", { className: "muted" },
-      "Optional. Fetches planner items with your Canvas login to mark submitted / graded work. The feed alone never needs your login.");
 
-    root.append(enableLabel, enableHint, savedLine, feedInput, buttonRow, plannerLabel, plannerHint, message);
+    root.append(enableLabel, savedLine, feedInput, buttonRow, plannerLabel, message);
     section.appendChild(root);
 
     async function refreshSaved() {

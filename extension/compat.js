@@ -13,7 +13,7 @@
 //     pulls both in via the guarded importScripts call below.
 //   - Any scripts-array background page: the manifest lists them in order and
 //     the guard below (typeof importScripts === "function") skips reloading.
-//   - Content scripts / popup: manifest / popup.html list compat.js first.
+//   - Content scripts / HTML pages: manifest or page script-tag order lists compat.js first.
 (function () {
   if (globalThis.PrairieRunExt) return;
 
@@ -199,6 +199,15 @@
     identityGetRedirectURL: (path) => ext.identity.getRedirectURL(path),
     identityLaunchWebAuthFlow: (details) => callAsync(ext.identity, "launchWebAuthFlow", details),
     addRuntimeMessageListener: (listener) => ext.runtime.onMessage.addListener(listener),
+    // Toolbar button click (only fires when no default_popup is declared).
+    addActionClickedListener: (listener) => {
+      const area = ext.action?.onClicked;
+      if (!area || typeof area.addListener !== "function") {
+        return Promise.reject(new Error("Extension action API is unavailable."));
+      }
+      area.addListener(listener);
+      return Promise.resolve();
+    },
     addStorageChangedListener: (listener) => ext.storage.onChanged.addListener(listener),
     addStartupListener: (listener) => ext?.runtime?.onStartup?.addListener(listener),
     addInstalledListener: (listener) => ext?.runtime?.onInstalled?.addListener(listener),

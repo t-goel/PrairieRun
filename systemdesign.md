@@ -53,7 +53,7 @@ legacy events with different marker IDs without comparing assignment titles.
 A stored repair-version marker forces full reconciliation of dated assignments
 on the first scan after this upgrade, including past-due work. The marker and
 daily sync timestamp advance only when every exported assignment succeeds.
-Partial failures appear in the popup and leave repair due on the next scan.
+Partial failures appear in the dashboard page and leave repair due on the next scan.
 Repair version 2 forces another reconciliation for installations that already
 completed the first repair. Verified source URLs and aliases persist across
 scans of the same canonical ID; newly found identities trigger repair even for
@@ -80,7 +80,7 @@ PrairieLearn page
       ├─ home-panel.js             (embedded display/edit surface)
       └─ view-utils.js             (shared filtering/sorting/status helpers)
 
-Popup ──> background.js
+Dashboard page ──> background.js
              ├─ scans course assessment tabs
              ├─ stores normalized assignment state
              ├─ invokes calendar.js (via oauth-config.js + auth-utils.js)
@@ -91,7 +91,7 @@ Popup ──> background.js
 calendar.js ──> Google Calendar API
 ```
 
-The popup and the home-panel footer are thin auth clients: they send
+The dashboard page and the home-panel footer are thin auth clients: they send
 `PRAIRIERUN_AUTH_STATUS` / `PRAIRIERUN_AUTH_CONNECT` /
 `PRAIRIERUN_AUTH_DISCONNECT` to the background worker, which delegates to
 `calendar.js`. Tokens live only in `storage.session` (via `PrairieRunExt`
@@ -108,7 +108,7 @@ Only the Connect button passes `interactive:true` (via
 (`notifyHomeTab`, `resyncStoredAssignments`, `PRAIRIERUN_ASSIGNMENT_UPDATED`)
 catch `AuthRequiredError` and set sync status `{ state: "auth_required",
 source: "google", current: "Connect Google Calendar to sync." }` instead of a
-per-assignment failure. The popup renders that state with a Connect button.
+per-assignment failure. The dashboard page renders that state with a Connect button.
 
 ## Multi-source scaffold (PR 1, no behavior change)
 
@@ -134,7 +134,9 @@ config first, `calendar.js` ahead of the `sync-orchestrator.js` stub), so
 the calendar module is a live dependency even though it is not listed in the
 manifest's content-script array.
 
-The popup is status/settings-only. PrairieLearn scanning begins from the home
+The dashboard page (`extension/options.html`, opened by the toolbar button via
+`action.onClicked`; there is no popup) is status/settings-only. PrairieLearn
+scanning begins from the home
 page automatically, and a named extension alarm runs a full Calendar
 reconciliation at least once per 24-hour interval. The daily reconciliation
 includes stored assignments with due dates even when their normalized data is

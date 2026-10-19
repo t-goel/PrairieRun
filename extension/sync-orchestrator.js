@@ -116,7 +116,7 @@
     if (!adapter || typeof adapter.sync !== "function") {
       return { status: "error", items: [], error: "Invalid adapter.", checkedAt: checkedAt() };
     }
-    // No host permission yet: never fetch, report disabled so the popup can
+    // No host permission yet: never fetch, report disabled so the dashboard page can
     // offer Grant access.
     let permitted = true;
     try {

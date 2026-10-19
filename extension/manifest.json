@@ -4,8 +4,7 @@
   "version": "0.1.0",
   "description": "Scan PrairieLearn assignments and stage them for Google Calendar.",
   "action": {
-    "default_title": "PrairieRun",
-    "default_popup": "popup.html"
+    "default_title": "Open PrairieRun"
   },
   "background": {
     "service_worker": "background.js"

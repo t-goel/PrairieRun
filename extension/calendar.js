@@ -157,7 +157,7 @@ async function getCalendarToken(options = {}) {
   } else {
     // Unattended callers (daily alarm, automatic scans) must never open a
     // Google window. Try silent auth only; on failure report auth_required
-    // so the popup can offer Connect.
+    // so the dashboard page can offer Connect.
     try {
       responseUrl = await PrairieRunExt.identityLaunchWebAuthFlow({ url, interactive: false });
     } catch (_silentError) {

@@ -7,12 +7,13 @@ stores normalized assignment data locally, and syncs eligible assignments to
 Google Calendar.
 
 The owner approved multi-site expansion: PrairieLearn, PrairieTest,
-Gradescope, and Canvas, plus a "Sync now" popup button. That approval
+Gradescope, and Canvas, plus a "Sync now" button. That approval
 overrides the "no manual scan button" rule below for the multi-source work.
 
 The current product surface is the embedded PrairieRun panel on the
-PrairieLearn home page plus the extension popup. The old standalone staging
-page has been removed.
+PrairieLearn home page plus the full-page dashboard (`extension/options.html`).
+There is no toolbar popup; clicking the extension's toolbar button opens the
+dashboard page in a new tab. The old standalone staging page has been removed.
 
 ## Current Architecture
 
@@ -23,7 +24,7 @@ PrairieLearn page
       -> home-panel.js            (embedded display/edit surface)
       -> view-utils.js            (shared filtering/sorting/status helpers)
 
-Popup -> background.js
+Options page (dashboard) -> background.js
            -> scans course assessment tabs
            -> stores normalized assignment state
            -> invokes calendar.js
@@ -52,7 +53,7 @@ per-project change). `auth-utils.js` is the pure error-classification helper
   Minimum Firefox is 115 (`storage.session` floor; the shim falls back to
   memory without it).
 - `extension/compat.js` loads first in every context (service worker via a
-  guarded `importScripts`, content scripts via manifest order, popup via
+  guarded `importScripts`, content scripts via manifest order, HTML pages via
   script-tag order) and exposes `PrairieRunExt`. All runtime code must use
   `PrairieRunExt` instead of `chrome.*`/`browser.*` directly. Firefox is
   identified from its user agent because Brave may also expose a `browser`
@@ -72,8 +73,9 @@ per-project change). `auth-utils.js` is the pure error-classification helper
 
 - Automatic PrairieLearn scanning and automatic Google Calendar sync are the
   default behavior.
-- Do not add a manual scan button to the popup; opening or refreshing the
-  PrairieLearn home page starts scanning automatically.
+- The toolbar button opens the full dashboard page (there is no popup). The
+  only manual scan trigger is the approved "Sync now" button; opening or
+  refreshing the PrairieLearn home page starts scanning automatically.
 - Calendar reconciliation runs on the first successful scan and then at least
   once every 24 hours, including assignments that have not changed.
 - The embedded home panel should stay directly below the PrairieLearn course
@@ -101,8 +103,8 @@ per-project change). `auth-utils.js` is the pure error-classification helper
   class/calendar color.
 - Preserve duplicate prevention via stable PrairieRun identifiers in calendar
   event metadata/descriptions.
-- Google sign-in is per-user `launchWebAuthFlow` (implicit flow): the popup and
-  the home-panel footer offer Connect/Disconnect, status shows
+- Google sign-in is per-user `launchWebAuthFlow` (implicit flow): the dashboard
+  page and the home-panel footer offer Connect/Disconnect, status shows
   `Not connected` / `Connected, expires <time>`, and Disconnect revokes at
   `oauth2.googleapis.com/revoke` and clears the session token.
 - Tokens live only in `storage.session`/memory (via `PrairieRunExt`
@@ -110,7 +112,8 @@ per-project change). `auth-utils.js` is the pure error-classification helper
   Disconnect. On Calendar 401, clear the cached token once and retry with a
   fresh token before failing.
 - `redirect_uri_mismatch` / `invalid_client` / cancellation each produce a
-  distinct human-readable message; the popup has a copy-redirect-URI affordance
+  distinct human-readable message; the dashboard page has a copy-redirect-URI
+  affordance
   for registering the install in the GCP OAuth client.
 - Background runs never open a Google window. `getCalendarToken()` defaults to
   non-interactive; without a cached token it tries silent auth once and throws
@@ -161,12 +164,12 @@ per-project change). `auth-utils.js` is the pure error-classification helper
   Titles narrow candidates but never authorize merging; only exact server
   redirects establish new links. Persist verified links in
   prairierunAssignmentLinks and reuse them without user input.
-- Popup status listens for sync-status storage updates and distinguishes
+- Dashboard status listens for sync-status storage updates and distinguishes
   Calendar syncing from completed scanning. A completed Calendar repair reports
   the actual number of removed duplicates after the API calls succeed.
 - The repair-version marker forces a full reconciliation on the next scan
   after upgrading. Advance it and the daily-success timestamp only when all
-  exported assignments succeed; expose partial failures in the popup status.
+  exported assignments succeed; expose partial failures in the page status.
 
 ## UI Rules
 

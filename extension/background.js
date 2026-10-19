@@ -452,7 +452,7 @@ PrairieRunExt.addRuntimeMessageListener((message, sender, sendResponse) => {
           origins: [...(adapter.origins || [])],
           signInUrl: adapter.signInUrl,
         }));
-      } catch { /* registry unavailable in some contexts; popup renders without labels */ }
+      } catch { /* registry unavailable in some contexts; the page renders without labels */ }
       sendResponse({ ok: true, assignments: stored[ASSIGNMENTS_KEY] || [], sync: stored[SYNC_KEY] || { state: "idle" }, settings: { ...defaultSettings, ...(stored[SETTINGS_KEY] || {}) }, sourceStatus: stored["prairierunSourceStatus"] || {}, sources });
     }).catch((error) => sendResponse({ ok: false, error: error?.message || "Could not read extension state." }));
     return true;
@@ -594,6 +594,11 @@ PrairieRunExt.addStorageChangedListener((changes, areaName) => {
 PrairieRunExt.addAlarmsListener?.((alarm) => {
   if (alarm?.name === DAILY_CALENDAR_SYNC_ALARM) runDailyCalendarSync().catch((error) => debugLog("Daily Calendar alarm failed", { error: error.message }));
   if (alarm?.name === BACKGROUND_SYNC_ALARM) runBackgroundSync("alarm").catch((error) => debugLog("Background sync alarm failed", { error: error.message }));
+});
+
+// The toolbar button opens the full PrairieRun page; there is no popup.
+PrairieRunExt.addActionClickedListener?.(() => {
+  PrairieRunExt.tabsCreateForeground("options.html").catch((error) => debugLog("Could not open the PrairieRun page", { error: error.message }));
 });
 PrairieRunExt.alarmsCreate?.(DAILY_CALENDAR_SYNC_ALARM, { delayInMinutes: 24 * 60, periodInMinutes: 24 * 60 }).catch((error) => debugLog("Could not schedule daily Calendar synchronization", { error: error.message }));
 ensureBackgroundSyncAlarm().catch((error) => debugLog("Could not schedule background synchronization", { error: error.message }));

@@ -1,6 +1,7 @@
 prairierun-stage-0-captures-*.json
 
 dist-firefox/
+node_modules/
 .DS_Store
 # Private Chrome extension signing key: the manifest `key` is public and
 # committed, but the .pem that generates it must never be committed.
