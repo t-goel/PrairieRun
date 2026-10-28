@@ -91,7 +91,7 @@ test("Golden output for 4 items matches expected shapes, headers, and time forma
 
   // PL item check: block1h shape
   assert.ok(text.includes("UID:pl:123:assessment:456\r\n"));
-  assert.ok(text.includes("DTSTART:20260912T035900Z\r\n"));
+  assert.ok(text.includes("DTSTART:20260912T044400Z\r\n"));
   assert.ok(text.includes("DTEND:20260912T045900Z\r\n"));
   assert.ok(text.includes("SUMMARY:[CS 225] Homework 1\r\n"));
 
@@ -304,8 +304,8 @@ test("Round-trip: if ics-parse.js from PR 4 is present, parsing the output retur
     } else if (original.kind === "exam") {
       assert.equal(instant.iso, original.startAt);
     } else {
-      // block1h dtstart is dueAt - 1h
-      const expectedStart = new Date(new Date(original.dueAt).getTime() - 60 * 60 * 1000).toISOString();
+      // block1h dtstart is dueAt - 15m
+      const expectedStart = new Date(new Date(original.dueAt).getTime() - 15 * 60 * 1000).toISOString();
       assert.equal(instant.iso, expectedStart);
     }
   }

@@ -274,7 +274,7 @@
   const adapter = {
     id: "prairietest",
     label: "PrairieTest",
-    origins: [PT_ORIGIN],
+    origins: [`${PT_ORIGIN}/*`],
     signInUrl: PT_HOME_URL,
     parsers,
     isSignedOut,

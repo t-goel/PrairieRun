@@ -228,6 +228,8 @@ test("normalizeCourseCode ignores case, whitespace, and punctuation", () => {
   assert.equal(store.normalizeCourseCode("cs-498"), "CS498");
   assert.equal(store.normalizeCourseCode("CS498"), "CS498");
   assert.equal(store.normalizeCourseCode(" cs_498 "), "CS498");
+  assert.equal(store.normalizeCourseCode("Fall 2026 CS 425"), "CS425");
+  assert.equal(store.normalizeCourseCode("FA2026_CS425"), "CS425");
   // Long display names keep at most the code core plus 3 trailing letters.
   assert.equal(store.normalizeCourseCode("CS 425 AL1 Fall 2026 CRN12345"), "CS425AL1");
 });
@@ -328,4 +330,68 @@ test("digit-suffix titles like Quiz 1 vs Quiz 10 are never duplicates", () => {
   );
   assert.equal(items.length, 2);
   assert.deepEqual(nearMisses, []);
+});
+
+test("suggestCourseLinks recovers Gradescope CS425 from underscore short names", () => {
+  const gs = gradescopeItem({
+    courseName: "fa26_cs425",
+    courseCode: null,
+    courseKey: "gradescope:101",
+    id: "gs:101:555",
+    url: "https://www.gradescope.com/courses/101/assignments/555",
+  });
+  const links = store.suggestCourseLinks([canvasItem(), gs]);
+  assert.ok(links.CS425, "expected a CS425 bucket");
+  assert.deepEqual(links.CS425.canvas, ["canvas:55"]);
+  assert.deepEqual(links.CS425.gradescope, ["gradescope:101"]);
+});
+
+test("suggestCourseLinks recovers Gradescope CS425 from term prefixes like Fall 2026 or FA2026", () => {
+  const gs1 = gradescopeItem({
+    courseName: "Fall 2026 CS 425",
+    courseCode: null,
+    courseKey: "gradescope:101",
+    id: "gs:101:555",
+    url: "https://www.gradescope.com/courses/101/assignments/555",
+  });
+  const links1 = store.suggestCourseLinks([canvasItem(), gs1]);
+  assert.ok(links1.CS425, "expected CS425 bucket for Fall 2026 CS 425");
+  assert.deepEqual(links1.CS425.gradescope, ["gradescope:101"]);
+  assert.deepEqual(links1.CS425.canvas, ["canvas:55"]);
+
+  const gs2 = gradescopeItem({
+    courseName: "FA2026_CS425",
+    courseCode: null,
+    courseKey: "gradescope:102",
+    id: "gs:102:555",
+    url: "https://www.gradescope.com/courses/102/assignments/555",
+  });
+  const links2 = store.suggestCourseLinks([canvasItem(), gs2]);
+  assert.ok(links2.CS425, "expected CS425 bucket for FA2026_CS425");
+  assert.deepEqual(links2.CS425.gradescope, ["gradescope:102"]);
+});
+
+test("reconcileCourseLinks folds enrolled courses with zero assignments", () => {
+  const canvas = canvasItem();
+  const results = {
+    canvas: okResult([canvas]),
+    gradescope: {
+      status: "ok",
+      items: [],
+      courses: [
+        {
+          id: "101",
+          courseKey: "gradescope:101",
+          courseCode: "CS 425",
+          courseName: "Fall 2026 CS 425",
+          source: "gradescope",
+        },
+      ],
+    },
+  };
+  const merged = store.reconcileCourseLinks({}, [canvas], results);
+  assert.ok(merged.CS425, "expected CS425 link row");
+  assert.deepEqual(merged.CS425.canvas, ["canvas:55"]);
+  assert.deepEqual(merged.CS425.gradescope, ["gradescope:101"]);
+  assert.equal(merged.CS425.confirmed, true, "expected auto-confirmed when 2 sources present");
 });

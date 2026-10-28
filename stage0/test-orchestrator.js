@@ -52,7 +52,7 @@ function loadOrchestrator({ adapters = [], local = {}, session = {}, fetchImpl =
   };
   for (const adapter of adapters) sandbox.PrairieRunSources.register(adapter);
   run("sync-orchestrator.js");
-  return { api: sandbox.PrairieRunOrchestrator, saved, sessionData, outputCalls: () => outputCalls };
+  return { api: sandbox.PrairieRunOrchestrator, saved, sessionData, outputCalls: () => outputCalls, ext: sandbox.PrairieRunExt };
 }
 
 function stubAdapter(overrides = {}) {
@@ -183,6 +183,29 @@ test("a missing permission gives disabled without calling the adapter", async ()
   assert.equal(result.results.gated.status, "disabled");
   assert.equal(result.results.gated.error, "permission");
   assert.equal(harness.saved.prairierunSourceStatus.gated.status, "disabled");
+});
+
+test("a throwing permissionsContains fails closed (disabled, no CORS fetch)", async () => {
+  let syncCalls = 0;
+  const harness = loadOrchestrator({
+    adapters: [
+      stubAdapter({
+        id: "gated",
+        origins: ["https://gated.example.com"],
+        sync: async () => {
+          syncCalls += 1;
+          return { status: "ok", items: [], checkedAt: new Date().toISOString() };
+        },
+      }),
+    ],
+  });
+  harness.ext.permissionsContains = async () => {
+    throw new Error("Invalid value for argument 1. Property 'origins': Error at index 0: Value must not be empty.");
+  };
+  const result = await harness.api.runSync({ sources: ["gated"] });
+  assert.equal(syncCalls, 0);
+  assert.equal(result.results.gated.status, "disabled");
+  assert.equal(result.results.gated.error, "permission");
 });
 
 test("an adapter-reported signed_out is preserved", async () => {

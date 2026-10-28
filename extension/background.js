@@ -2,7 +2,7 @@
 // calendar module. In Firefox's scripts-array background page (or any context
 // where the manifest already loaded them in order) `importScripts` is either
 // undefined or the modules already exist, so this is a no-op there.
-if (typeof importScripts === "function" && !globalThis.PrairieRunCalendar) importScripts("compat.js", "oauth-config.js", "auth-utils.js", "deadline-model.js", "source-registry.js", "net.js", "parse-host.js", "prairielearn-adapter.js", "identity-resolver.js", "source-prairielearn.js", "source-canvas.js", "source-gradescope.js", "source-prairietest.js", "ics-parse.js", "ics-writer.js", "deadline-store.js", "outputs.js", "relay-push.js", "calendar.js", "sync-orchestrator.js");
+if (typeof importScripts === "function" && !globalThis.PrairieRunCalendar) importScripts("compat.js", "oauth-config.js", "auth-utils.js", "deadline-model.js", "source-registry.js", "net.js", "parse-host.js", "prairielearn-adapter.js", "identity-resolver.js", "source-prairielearn.js", "source-canvas.js", "source-gradescope.js", "source-prairietest.js", "source-courseweb.js", "ics-parse.js", "ics-writer.js", "deadline-store.js", "outputs.js", "relay-push.js", "calendar.js", "sync-orchestrator.js");
 
 const ASSIGNMENTS_KEY = "prairierunAssignments";
 const SYNC_KEY = "prairierunSyncStatus";
@@ -11,6 +11,13 @@ const BACKGROUND_CALENDAR_SYNC_KEY = "prairierunCalendarSync";
 const DAILY_CALENDAR_SYNC_KEY = "prairierunLastDailyCalendarSync";
 const CALENDAR_REPAIR_VERSION_KEY = "prairierunCalendarRepairVersion";
 const CALENDAR_REPAIR_VERSION = 2;
+// Direct Google OAuth sync UI is hidden; Calendar feed is the first-class path.
+// Flip this when re-enabling the dashboard/home-panel Connect surfaces.
+// Tests may override via globalThis.PRAIRIERUN_DIRECT_GOOGLE_SYNC.
+const DIRECT_GOOGLE_SYNC_ENABLED =
+  typeof globalThis.PRAIRIERUN_DIRECT_GOOGLE_SYNC === "boolean"
+    ? globalThis.PRAIRIERUN_DIRECT_GOOGLE_SYNC
+    : false;
 const ASSIGNMENT_LINKS_KEY = "prairierunAssignmentLinks";
 const DAILY_CALENDAR_SYNC_ALARM = "prairierun-daily-calendar-sync";
 const DAILY_CALENDAR_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -291,6 +298,10 @@ async function sendHomeUpdate(tabId, assignments, exportResults = []) {
 
 async function notifyHomeTab(tabId, assignments, detectedIds) {
   await sendHomeUpdate(tabId, assignments);
+  if (!DIRECT_GOOGLE_SYNC_ENABLED) {
+    await setSyncStatus({ state: "complete", current: "Ready", found: assignments.length });
+    return;
+  }
   const stored = await PrairieRunExt.storageLocalGet([DAILY_CALENDAR_SYNC_KEY, CALENDAR_REPAIR_VERSION_KEY]);
   const lastDailySync = Number(stored[DAILY_CALENDAR_SYNC_KEY]) || 0;
   const repairDue = stored[CALENDAR_REPAIR_VERSION_KEY] !== CALENDAR_REPAIR_VERSION;
@@ -414,6 +425,10 @@ PrairieRunExt.addRuntimeMessageListener((message, sender, sendResponse) => {
     return true;
   }
   if (message?.type === "PRAIRIERUN_ASSIGNMENT_UPDATED" && sender.tab?.id) {
+    if (!DIRECT_GOOGLE_SYNC_ENABLED) {
+      sendResponse({ ok: true, skipped: "direct_google_sync_disabled" });
+      return true;
+    }
     const assignment = message.assignment;
     if (!assignment?.id || !["new", "changed", "error"].includes(assignment.syncState)) {
       sendResponse({ ok: true, skipped: true });
@@ -472,6 +487,7 @@ async function findPrairieLearnHomeTab() {
 }
 
 async function resyncStoredAssignments() {
+  if (!DIRECT_GOOGLE_SYNC_ENABLED) return;
   const stored = await PrairieRunExt.storageLocalGet(ASSIGNMENTS_KEY);
   const assignments = (stored[ASSIGNMENTS_KEY] || []).filter((item) => item.dueAtLocal && item.syncState !== "stale");
   if (!assignments.length) return;
@@ -503,6 +519,7 @@ async function resyncStoredAssignments() {
 }
 
 async function runDailyCalendarSync() {
+  if (!DIRECT_GOOGLE_SYNC_ENABLED) return;
   if (dailySyncInFlight) return;
   dailySyncInFlight = true;
   try {
@@ -570,6 +587,13 @@ try {
   PrairieRunExt.addInstalledListener?.(() => {
     ensureBackgroundSyncAlarm().catch(() => undefined);
     runBackgroundSync("installed").catch(() => undefined);
+  });
+  // When the user grants optional host access via Site access (Brave) or the
+  // toolbar Allow chip, re-run sync so Gradescope/PrairieTest stop looking
+  // stuck on "needs permission" / CORS without another manual Sync now.
+  PrairieRunExt.addPermissionsAddedListener?.((granted) => {
+    if (!granted?.origins?.length) return;
+    runBackgroundSync("permissions-added").catch(() => undefined);
   });
 } catch (error) {
   debugLog("Could not register startup listeners", { error: error.message });

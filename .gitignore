@@ -7,3 +7,5 @@ node_modules/
 # committed, but the .pem that generates it must never be committed.
 extension/key.pem
 *.pem
+
+.env.local

@@ -1,7 +1,7 @@
 // PrairieRun DeadlineItem normalized model.
 // No bundler: plain IIFE script. Loads in background, offscreen, options, and Node tests.
 (function () {
-  const SOURCE_IDS = ["prairielearn", "prairietest", "gradescope", "canvas", "manual"];
+  const SOURCE_IDS = ["prairielearn", "prairietest", "gradescope", "canvas", "courseweb", "manual"];
   const STATUSES = ["not_started", "in_progress", "submitted", "graded", "completed", "unknown"];
   const KINDS = ["assignment", "exam", "quiz", "event"];
 
@@ -101,8 +101,11 @@
     return dtf.format(date).replace(/^(\w{3}),/, "$1");
   }
 
+  const TERM_PREFIX = /^(?:FA|FALL|SP|SPRING|SU|SUMMER|WI|WIN|WINTER|AU|AUTUMN)[\s_-]*(?:20\d{2}|\d{2})(?![0-9])[\s_-]*/i;
+
   function courseCodeFromName(courseName) {
-    const match = String(courseName || "").match(/^([A-Za-z]{2,4})\s*(\d{3}[A-Za-z]{0,3})/);
+    const stripped = String(courseName || "").trim().replace(TERM_PREFIX, "");
+    const match = stripped.match(/^([A-Za-z]{2,4})\s*(\d{3}[A-Za-z]{0,3})/);
     if (!match) return null;
     return `${match[1].toUpperCase()} ${match[2].toUpperCase()}`;
   }

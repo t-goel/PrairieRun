@@ -19,7 +19,8 @@
   "optional_host_permissions": [
     "https://canvas.illinois.edu/*",
     "https://www.gradescope.com/*",
-    "https://us.prairietest.com/*"
+    "https://us.prairietest.com/*",
+    "https://*.illinois.edu/*"
   ],
   "options_ui": {
     "page": "options.html",

@@ -25,6 +25,10 @@
     "https://canvas.illinois.edu",
   ]);
 
+  function isIllinoisCourseHost(url) {
+    return url.protocol === "https:" && url.hostname.endsWith(".illinois.edu");
+  }
+
   function assertSafePlPath(url) {
     const path = url.pathname;
     // Allowed (exact, no start-route):
@@ -53,7 +57,7 @@
     }
     if (url.protocol !== "https:") throw new SafetyError(`Unsafe URL (protocol): ${url.href}`);
     if (url.origin === PL_ORIGIN) return assertSafePlPath(url);
-    if (ALLOWED_ORIGINS.has(url.origin)) return url;
+    if (ALLOWED_ORIGINS.has(url.origin) || isIllinoisCourseHost(url)) return url;
     throw new SafetyError(`Unsafe URL (origin not allowed): ${url.href}`);
   }
 

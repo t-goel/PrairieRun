@@ -1,12 +1,13 @@
-// PrairieRun Calendar feed card: one-click "Get my feed URL" activation, a
-// collapsed custom-relay form for advanced setup, publish on demand, and the
-// stable subscription URL. The feed auto-updates after every successful
-// source sync via outputs.js -> PrairieRunRelay.autoPublish.
+// PrairieRun Calendar feed card: multi-device Convex Auth (Google) activation,
+// one-click anonymous feed activation fallback, collapsed custom-relay form,
+// on-demand publishing, and the stable subscription URL.
+// The feed auto-updates after every successful source sync via outputs.js -> PrairieRunRelay.autoPublish.
 // All extension APIs go through PrairieRunExt; nothing here touches chrome.*.
 (function () {
   const SETTINGS_KEY = "prairierunSettings";
   const SECRETS_KEY = "prairierunSecrets";
   const DEADLINES_KEY = "prairierunDeadlines";
+  const COURSE_FEEDS_KEY = "prairierunCourseFeeds";
   const FALLBACK_RELAY_URL = "https://prairierun-feed.vercel.app";
   const CLAIM_HELP = "Could not reach the PrairieRun feed relay; try again or set a custom relay below.";
 
@@ -15,6 +16,9 @@
   }
   function relay() {
     return globalThis.PrairieRunRelay || null;
+  }
+  function auth() {
+    return globalThis.PrairieRunFeedAuth || null;
   }
 
   function make(tag, attrs = {}, text = null) {
@@ -29,7 +33,7 @@
   }
 
   // Fallback feed identity for the custom-relay path (the one-click path
-  // receives a feedId from the relay's /api/claim instead).
+  // receives a feedId from the relay's /api/claim or Convex auth instead).
   function makeFeedId() {
     let hex = "";
     try {
@@ -146,6 +150,45 @@
     }
   }
 
+  // Normalize prairierunCourseFeeds map -> sorted { code, url } rows for the card.
+  function courseFeedEntries(map) {
+    if (!map || typeof map !== "object" || Array.isArray(map)) return [];
+    return Object.entries(map)
+      .filter(([code, url]) => String(code || "").trim() && String(url || "").trim())
+      .map(([code, url]) => ({ code: String(code).trim(), url: String(url).trim() }))
+      .sort((a, b) => a.code.localeCompare(b.code, undefined, { sensitivity: "base" }));
+  }
+
+  async function loadCourseFeeds(relayApi) {
+    if (relayApi && typeof relayApi.readCourseFeeds === "function") {
+      try {
+        const feeds = await relayApi.readCourseFeeds();
+        if (feeds && typeof feeds === "object" && !Array.isArray(feeds)) return feeds;
+      } catch { /* fall through to storage */ }
+    }
+    try {
+      const stored = (await ext()?.storageLocalGet?.([COURSE_FEEDS_KEY])) || {};
+      const value = stored[COURSE_FEEDS_KEY];
+      return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function wireCopyButton(button, getUrl) {
+    button.addEventListener("click", async () => {
+      const url = typeof getUrl === "function" ? getUrl() : getUrl;
+      if (!url) return;
+      try {
+        await navigator.clipboard.writeText(url);
+        button.textContent = "Copied";
+      } catch {
+        button.textContent = "Copy failed";
+      }
+      setTimeout(() => { button.textContent = "Copy"; }, 1500);
+    });
+  }
+
   async function render(section) {
     if (!section || typeof document === "undefined") return;
     section.querySelectorAll("[data-prr-feed]").forEach((node) => node.remove());
@@ -160,31 +203,80 @@
       root.appendChild(make("p", { className: "muted" }, "The feed module is unavailable."));
       return;
     }
+    const feedAuthApi = auth();
     const defaultRelayUrl = relayApi.DEFAULT_RELAY_URL || FALLBACK_RELAY_URL;
 
-    const statusLine = make("p", { className: "muted", "data-prr-feed-status": "1" });
+    // Controls first, then subscription URL (+ per-course rows), then status line.
+    // Heading-only chrome: no subtitle under the card h2.
+    const actions = make("div", { className: "prr-feed-actions" });
     const urlRow = make("div", { className: "auth-redirect-row prr-feed-url-row", hidden: "hidden" });
+    const urlLabel = make("span", { className: "prr-feed-url-label", hidden: "hidden" }, "All courses");
     const urlCode = make("code", {});
     const copyButton = make("button", { className: "secondary", type: "button" }, "Copy");
-    copyButton.addEventListener("click", async () => {
-      const url = urlCode.textContent || "";
-      if (!url) return;
-      try {
-        await navigator.clipboard.writeText(url);
-        copyButton.textContent = "Copied";
-      } catch {
-        copyButton.textContent = "Copy failed";
-      }
-      setTimeout(() => { copyButton.textContent = "Copy"; }, 1500);
+    wireCopyButton(copyButton, () => urlCode.textContent || "");
+    urlRow.append(urlLabel, urlCode, copyButton);
+
+    const courseFeedsList = make("div", {
+      className: "prr-course-feeds",
+      "data-prr-course-feeds": "1",
+      hidden: "hidden",
     });
-    urlRow.append(urlCode, copyButton);
-    root.append(statusLine, urlRow);
 
-    const actions = make("div", { className: "prr-feed-actions" });
-    root.appendChild(actions);
+    const statusLine = make("p", { className: "muted", "data-prr-feed-status": "1" });
 
-    // One-click activation: the only control a fresh install needs.
-    const claimButton = make("button", { type: "button", className: "primary" }, "Get my feed URL");
+    root.append(urlRow, courseFeedsList, actions, statusLine);
+
+    // Primary multi-device sign-in button
+    const signInButton = make("button", { type: "button", className: "primary" }, "Sign in with Google");
+    signInButton.addEventListener("click", async () => {
+      signInButton.disabled = true;
+      try {
+        if (!feedAuthApi || typeof feedAuthApi.authenticateAndHydrate !== "function") {
+          throw new Error("Feed authentication module is unavailable.");
+        }
+        statusLine.textContent = "Signing in with Google…";
+        const customConvex = normalizeRelayUrl(convexInput.value);
+        const customRelay = normalizeRelayUrl(urlInput.value);
+        const authResult = await feedAuthApi.authenticateAndHydrate({
+          convexUrl: customConvex || undefined,
+          relayUrl: customRelay || undefined,
+        });
+
+        const relayUrl = authResult.relayUrl || defaultRelayUrl;
+        try {
+          if (!(await relayApi.hasRelayPermission(relayUrl))) {
+            await ext().permissionsRequest([`${originOf(relayUrl)}/*`]);
+          }
+        } catch { /* CORS handles page publish */ }
+
+        await publishNow();
+      } catch (error) {
+        statusLine.textContent = error?.message || "Could not sign in with Google.";
+      } finally {
+        signInButton.disabled = false;
+      }
+    });
+
+    // Sign out button
+    const signOutButton = make("button", { type: "button", className: "secondary" }, "Sign out");
+    signOutButton.addEventListener("click", async () => {
+      signOutButton.disabled = true;
+      try {
+        statusLine.textContent = "Signing out…";
+        if (feedAuthApi && typeof feedAuthApi.signOut === "function") {
+          const customConvex = normalizeRelayUrl(convexInput.value);
+          await feedAuthApi.signOut({ convexUrl: customConvex || undefined });
+        }
+        await refresh();
+      } catch (error) {
+        statusLine.textContent = error?.message || "Could not sign out.";
+      } finally {
+        signOutButton.disabled = false;
+      }
+    });
+
+    // One-click anonymous activation: preserves the no-account activation path
+    const claimButton = make("button", { type: "button", className: "secondary" }, "Get anonymous feed URL");
     claimButton.addEventListener("click", async () => {
       claimButton.disabled = true;
       try {
@@ -192,11 +284,9 @@
         const relaySettings = loaded.settings.relay && typeof loaded.settings.relay === "object" ? loaded.settings.relay : {};
         const savedUrl = normalizeRelayUrl(relaySettings.relayUrl);
         const base = savedUrl || defaultRelayUrl;
-        // Already-claimed feeds (key + feedId saved with a relay URL) skip
-        // claiming and go straight to publishing.
         const alreadyReady = Boolean(savedUrl && relaySettings.feedId && loaded.secrets.relayPublishKey);
         if (!alreadyReady) {
-          statusLine.textContent = "Creating your feed…";
+          statusLine.textContent = "Creating your anonymous feed…";
           const claim = await relayApi.claimFeed(base);
           if (!claim.ok) {
             statusLine.textContent = claim.error || CLAIM_HELP;
@@ -206,23 +296,20 @@
           await writeRelaySettings(loaded.settings, { enabled: true, relayUrl: base, feedId: claim.feedId });
           await writeRelayKey(loaded.secrets, claim.key);
         }
-        // The activate click is the gesture for the optional permission the
-        // background needs to auto-publish later. Denial is fine: publishing
-        // still works via the relay's permissive CORS.
         try {
           if (!(await relayApi.hasRelayPermission(base))) {
             await ext().permissionsRequest([`${originOf(base)}/*`]);
           }
-        } catch { /* keep going; CORS handles the page publish */ }
+        } catch { /* CORS handles page publish */ }
         await publishNow();
       } catch (error) {
-        statusLine.textContent = error?.message || "Could not activate the feed.";
+        statusLine.textContent = error?.message || "Could not activate anonymous feed.";
       } finally {
         claimButton.disabled = false;
       }
     });
 
-    // Publish + off buttons (visible when configured).
+    // Publish + off buttons (visible when configured)
     const publishButton = make("button", { type: "button", className: "secondary" }, "Publish now");
     publishButton.addEventListener("click", async () => {
       publishButton.disabled = true;
@@ -234,6 +321,7 @@
         publishButton.disabled = false;
       }
     });
+
     const enableButton = make("button", { type: "button", className: "secondary" }, "Turn on auto-update");
     enableButton.addEventListener("click", async () => {
       enableButton.disabled = true;
@@ -243,7 +331,7 @@
           if (url && !(await relayApi.hasRelayPermission(url))) {
             await ext().permissionsRequest([`${originOf(url)}/*`]);
           }
-        } catch { /* optional; CORS publishing still works from the page */ }
+        } catch { /* CORS publishing still works */ }
         await writeRelaySettings(currentSettings, { enabled: true });
         await refresh();
       } catch (error) {
@@ -252,6 +340,7 @@
         enableButton.disabled = false;
       }
     });
+
     const offButton = make("button", { type: "button", className: "secondary" }, "Turn off auto-update");
     offButton.addEventListener("click", async () => {
       offButton.disabled = true;
@@ -265,19 +354,23 @@
       }
     });
 
-    // Advanced custom-relay setup, collapsed by default.
+    // Advanced custom-relay & auth setup, collapsed by default
     const customDetails = make("details", { className: "prr-feed-custom" });
-    customDetails.appendChild(make("summary", {}, "Use a custom relay"));
+    customDetails.appendChild(make("summary", {}, "Use a custom relay / auth backend"));
     const configCover = make("div", { className: "prr-feed-config" });
     const urlInput = make("input", { type: "url", placeholder: "Feed relay URL (https://your-relay.vercel.app)", spellcheck: "false", autocomplete: "off" });
-    const keyInput = make("input", { type: "password", placeholder: "Publish key", autocomplete: "off", spellcheck: "false" });
+    const convexInput = make("input", { type: "url", placeholder: "Convex auth URL (https://your-app.convex.site)", spellcheck: "false", autocomplete: "off" });
+    const keyInput = make("input", { type: "password", placeholder: "Manual publish key", autocomplete: "off", spellcheck: "false" });
     const configMessage = make("p", { className: "muted", "data-prr-feed-config-msg": "1" });
     const connectButton = make("button", { type: "button", className: "secondary" }, "Save & publish");
-    for (const input of [urlInput, keyInput]) {
+
+    for (const input of [urlInput, convexInput, keyInput]) {
       input.addEventListener("focus", () => { configMessage.textContent = ""; });
     }
+
     connectButton.addEventListener("click", async () => {
       const url = normalizeRelayUrl(urlInput.value);
+      const convexUrl = normalizeRelayUrl(convexInput.value);
       const key = keyInput.value.trim();
       if (!url) {
         configMessage.textContent = "The relay URL must be an https:// address.";
@@ -303,11 +396,16 @@
           }
           if (!granted) permissionHint = "Relay access was not granted: publishing will only happen when you open this page and press Publish now.";
         }
-        await writeRelaySettings(settings, { relayUrl: url, feedId: settings.relay?.feedId || makeFeedId(), enabled: true });
+        const patch = {
+          relayUrl: url,
+          feedId: settings.relay?.feedId || makeFeedId(),
+          enabled: true,
+        };
+        if (convexUrl) patch.convexUrl = convexUrl;
+        await writeRelaySettings(settings, patch);
         await writeRelayKey(secrets, key);
         const result = await publishNow();
         if (result.ok && permissionHint) {
-          // Set after publishNow's trailing refresh so the hint is not wiped.
           configMessage.textContent = permissionHint;
         }
       } catch (error) {
@@ -316,7 +414,8 @@
         connectButton.disabled = false;
       }
     });
-    configCover.append(urlInput, keyInput, configMessage, connectButton);
+
+    configCover.append(urlInput, convexInput, keyInput, configMessage, connectButton);
     customDetails.appendChild(configCover);
     root.appendChild(customDetails);
 
@@ -324,7 +423,7 @@
     let relayInfo = {};
     let feedState = null;
 
-    // Publish the stored deadlines with the key currently saved for the card.
+    // Publish the stored deadlines with the key currently saved for the card
     async function publishNow() {
       statusLine.textContent = "Publishing feed…";
       await refresh();
@@ -335,32 +434,58 @@
       return result;
     }
 
+    function renderCourseFeeds(map) {
+      const entries = courseFeedEntries(map);
+      courseFeedsList.textContent = "";
+      const hasCourses = entries.length > 0;
+      courseFeedsList.hidden = !hasCourses;
+      urlLabel.hidden = !hasCourses;
+      if (!hasCourses) return;
+      for (const { code, url } of entries) {
+        const row = make("div", { className: "auth-redirect-row prr-course-feed-row" });
+        const label = make("span", { className: "prr-course-feed-label" }, code);
+        const codeEl = make("code", {});
+        codeEl.textContent = url;
+        const copy = make("button", { className: "secondary", type: "button" }, "Copy");
+        wireCopyButton(copy, () => url);
+        row.append(label, codeEl, copy);
+        courseFeedsList.appendChild(row);
+      }
+    }
+
     async function refresh() {
-      const [loaded, state] = await Promise.all([loadAll(), relayApi.readState()]);
+      const [loaded, state, courseFeeds] = await Promise.all([
+        loadAll(),
+        relayApi.readState(),
+        loadCourseFeeds(relayApi),
+      ]);
       currentSettings = loaded.settings;
       relayInfo = loaded.settings.relay && typeof loaded.settings.relay === "object" ? loaded.settings.relay : {};
       feedState = state;
       const configured = Boolean(relayInfo.relayUrl && relayInfo.feedId);
+      const isGoogleAuth = relayInfo.authAccount === "google";
 
-      // The subscription URL row is owned here and nowhere else: fully visible
-      // only when an actual URL exists, fully hidden otherwise (a display:
-      // flex rule would otherwise defeat the hidden attribute).
+      // The subscription URL row is shown when an actual URL exists
       const publishReady = Boolean(state?.url);
       urlRow.hidden = !publishReady;
       urlCode.textContent = publishReady ? state.url : "";
+      renderCourseFeeds(publishReady ? courseFeeds : {});
 
-      // Stale validation text never survives a refresh.
+      // Stale validation text never survives a refresh
       configMessage.textContent = "";
 
-      // Only pre-fill while the fields are untouched; the user may be typing.
+      // Only pre-fill while the fields are untouched; the user may be typing
       if (!urlInput.value) urlInput.value = relayInfo.relayUrl || "";
+      if (!convexInput.value && relayInfo.convexUrl) convexInput.value = relayInfo.convexUrl;
       void feedState;
 
       actions.textContent = "";
+
       if (!configured || (state?.state === "error" && !state?.url)) {
         if (!configured) {
-          statusLine.textContent = "One subscribable URL for every calendar app, updated after every scan. No Google setup.";
-          actions.appendChild(claimButton);
+          // Fresh activation: show Sign in with Google (primary) and Get anonymous feed URL (secondary)
+          actions.append(signInButton, claimButton);
+          statusLine.textContent = "Sign in to sync your calendar feed across devices, or claim an anonymous feed.";
         } else {
           actions.appendChild(publishButton);
           if (state?.error) statusLine.textContent = state.error;
@@ -369,20 +494,36 @@
       }
 
       if (relayInfo.enabled === true) {
-        actions.append(publishButton, offButton);
-        if (state?.state === "error" && state?.error) {
-          statusLine.textContent = state.error;
-        } else if (state?.publishedAt) {
-          statusLine.textContent = "";
-          const icon = makeCalendarIcon();
-          if (icon) statusLine.appendChild(icon);
-          statusLine.appendChild(document.createTextNode(formatPublishedAt(state.publishedAt)));
+        if (isGoogleAuth) {
+          // Signed in with Google
+          actions.append(publishButton, offButton, signOutButton);
+          if (state?.state === "error" && state?.error) {
+            statusLine.textContent = state.error;
+          } else if (state?.publishedAt) {
+            statusLine.textContent = "";
+            const icon = makeCalendarIcon();
+            if (icon) statusLine.appendChild(icon);
+            statusLine.appendChild(document.createTextNode(`${formatPublishedAt(state.publishedAt)} • Multi-device feed active`));
+          } else {
+            statusLine.textContent = "Multi-device feed active. Publishes after every scan.";
+          }
         } else {
-          statusLine.textContent = "Feed on. Publishes after every scan.";
+          // Anonymous feed active: allow syncing to Google account or publishing
+          actions.append(publishButton, offButton, signInButton);
+          if (state?.state === "error" && state?.error) {
+            statusLine.textContent = state.error;
+          } else if (state?.publishedAt) {
+            statusLine.textContent = "";
+            const icon = makeCalendarIcon();
+            if (icon) statusLine.appendChild(icon);
+            statusLine.appendChild(document.createTextNode(`${formatPublishedAt(state.publishedAt)} (anonymous)`));
+          } else {
+            statusLine.textContent = "Anonymous feed active. Sign in with Google to sync across devices.";
+          }
         }
       } else {
-        statusLine.textContent = "Feed off.";
-        actions.append(enableButton, offButton);
+        statusLine.textContent = isGoogleAuth ? "Feed off (Google account connected)." : "Feed off.";
+        actions.append(enableButton, isGoogleAuth ? signOutButton : signInButton);
       }
     }
 
@@ -396,7 +537,7 @@
     });
   }
 
-  const api = { render, normalizeRelayUrl, formatPublishedAt, makeCalendarIcon };
+  const api = { render, normalizeRelayUrl, formatPublishedAt, makeCalendarIcon, courseFeedEntries };
   globalThis.PrairieRunOptionsFeed = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })();

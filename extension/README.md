@@ -1,5 +1,16 @@
 # PrairieRun extension
 
+## Add UIUC course websites
+
+The dashboard's **Course websites** card accepts up to 25 HTTPS pages hosted
+on `illinois.edu`, including department sites and Grainger course pages. Add
+the exact assignment or schedule page you want checked; PrairieRun does not
+crawl the rest of the site. Then turn on **UIUC course websites** in Sources
+and grant the requested Illinois host access. Sync now checks the saved pages
+and extracts dates from fields labeled due or deadline and lists under an
+upcoming-deadlines heading. Pages are fetched with read-only GET requests;
+ambiguous dates elsewhere on a page are ignored.
+
 ## Current functionality
 
 - Scans the logged-in `us.prairielearn.com` home page and discovered course assessment pages.
@@ -31,6 +42,19 @@
 4. Select this `extension` directory.
 5. Log in to `https://us.prairielearn.com/`.
 6. Review the assignment panel below the PrairieLearn course links. Scanning and Calendar synchronization start automatically.
+
+## Gradescope / PrairieTest on Brave
+
+Enabling those sources requests optional host access from the toggle click.
+Chrome shows a permission prompt; **Brave often blocks that popup**, so a
+background fetch would hit CORS until the host is allowed.
+
+1. Toggle Gradescope or PrairieTest on (or click **Grant access**).
+2. If no prompt appears: `brave://extensions` → PrairieRun → **Details** →
+   **Site access** → allow `www.gradescope.com` / `us.prairietest.com`
+   (or **On all sites**).
+3. Click **Grant access** again (or Sync now). The background listens for
+   the grant and re-syncs automatically when Site access changes.
 
 ## Firefox (same codebase, generated manifest)
 

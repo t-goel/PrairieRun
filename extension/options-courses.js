@@ -1,10 +1,11 @@
-// PrairieRun course-link options (PR 7): confirm cross-source course links,
-// review near-miss duplicates. Renders into the #course-links section.
+// PrairieRun course-link options (PR 7): confirm cross-source course links.
+// Renders into the #course-links section.
 (function () {
   const LINKS_KEY = "prairierunCourseLinks";
   const DEADLINES_KEY = "prairierunDeadlines";
-  const SOURCES = ["prairielearn", "gradescope", "canvas", "prairietest"];
-  const SOURCE_LABELS = { prairielearn: "PrairieLearn", gradescope: "Gradescope", canvas: "Canvas", prairietest: "PrairieTest" };
+  const COURSES_KEY = "prairierunCourses";
+  const SOURCES = ["prairielearn", "gradescope", "canvas", "prairietest", "courseweb"];
+  const SOURCE_LABELS = { prairielearn: "PrairieLearn", gradescope: "Gradescope", canvas: "Canvas", prairietest: "PrairieTest", courseweb: "Website" };
 
   // options.html does not list deadline-store.js yet (shared load list; PR 10
   // adds it). Load the flat extension script on demand until then.
@@ -72,51 +73,157 @@
   }
 
   async function loadData() {
-    const stored = await globalThis.PrairieRunExt.storageLocalGet([DEADLINES_KEY, LINKS_KEY]);
+    const stored = await globalThis.PrairieRunExt.storageLocalGet([DEADLINES_KEY, LINKS_KEY, COURSES_KEY]);
     return {
       items: Array.isArray(stored[DEADLINES_KEY]) ? stored[DEADLINES_KEY] : [],
       links: migrateStoredLinks(stored[LINKS_KEY] && typeof stored[LINKS_KEY] === "object" ? stored[LINKS_KEY] : {}),
+      courses: Array.isArray(stored[COURSES_KEY]) ? stored[COURSES_KEY] : [],
     };
   }
 
-  function namesByCourseKey(items) {
-    const names = new Map();
+  // Derive a stable course home URL from an assignment URL for each source.
+  function courseHomeUrl(rawUrl) {
+    if (!rawUrl || typeof rawUrl !== "string") return null;
+    try {
+      const u = new URL(rawUrl);
+      const pl = u.pathname.match(/^(\/pl\/course_instance\/\d+)/i);
+      if (pl) return `${u.origin}${pl[1]}/assessments`;
+      const courses = u.pathname.match(/^(\/courses\/[^/]+)/i);
+      if (courses) return `${u.origin}${courses[1]}`;
+      // PrairieTest reservations live under /pt/…; course-level home is /pt.
+      if (/^\/pt(\/|$)/i.test(u.pathname)) return `${u.origin}/pt`;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  function urlsByCourseKey(items) {
+    const urls = new Map();
     for (const item of items || []) {
-      if (item?.courseKey && item?.courseName && !names.has(item.courseKey)) {
-        names.set(item.courseKey, item.courseName);
+      if (!item?.courseKey || urls.has(item.courseKey)) continue;
+      const href = courseHomeUrl(item.url || item.sourceUrl);
+      if (href) urls.set(item.courseKey, href);
+    }
+    return urls;
+  }
+
+  function normalizeLoose(value) {
+    const store = globalThis.PrairieRunDeadlineStore;
+    if (store && typeof store.normalizeCourseCode === "function") {
+      return store.normalizeCourseCode(value) || "";
+    }
+    return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  }
+
+  // Resolve a cell key (courseKey, courseName, or legacy course-code string)
+  // to a course home URL for that source column.
+  function resolveCourseHref(items, source, key, urlIndex) {
+    if (!key) return null;
+    if (urlIndex?.has(key)) return urlIndex.get(key);
+    const want = normalizeLoose(key);
+    for (const item of items || []) {
+      if (item?.source !== source) continue;
+      if (item.courseKey === key || item.courseName === key || item.courseCode === key) {
+        const href = courseHomeUrl(item.url || item.sourceUrl);
+        if (href) return href;
+      }
+      if (want) {
+        const candidates = [item.courseKey, item.courseName, item.courseCode]
+          .map(normalizeLoose)
+          .filter(Boolean);
+        if (candidates.includes(want)) {
+          const href = courseHomeUrl(item.url || item.sourceUrl);
+          if (href) return href;
+        }
       }
     }
-    return names;
+    return null;
   }
 
-  function itemById(items) {
-    const map = new Map();
-    for (const item of items || []) {
-      if (item?.id != null && !map.has(item.id)) map.set(item.id, item);
+  // Fold suggested rows that share a course family with existing link rows
+  // into the same family bucket, so e.g. "CS498DK" suggested alongside a
+  // confirmed "CS498" link collapses into the CS498 row.
+  function foldLinkRows(links, suggested) {
+    const store = globalThis.PrairieRunDeadlineStore;
+    const allCodes = [...new Set([...Object.keys(links || {}), ...Object.keys(suggested || {})])];
+    const family = store && typeof store.familyMapOf === "function"
+      ? store.familyMapOf(allCodes)
+      : null;
+    const foldedLinks = {};
+    const foldedSuggested = {};
+
+    function foldInto(target, source) {
+      for (const [code, entry] of Object.entries(source || {})) {
+        const bucket = family ? family.get(code) || code : code;
+        if (!target[bucket]) target[bucket] = { confirmed: false };
+        const row = target[bucket];
+        for (const s of SOURCES) {
+          const keys = entry[s];
+          if (!Array.isArray(keys)) continue;
+          if (!Array.isArray(row[s])) row[s] = [];
+          for (const k of keys) {
+            if (!row[s].includes(k)) row[s].push(k);
+          }
+          row[s].sort();
+        }
+        if (entry.confirmed === true) row.confirmed = true;
+      }
     }
-    return map;
+
+    foldInto(foldedLinks, links);
+    foldInto(foldedSuggested, suggested);
+    const codes = [...new Set([...Object.keys(foldedLinks), ...Object.keys(foldedSuggested)])].sort();
+    return { codes, links: foldedLinks, suggested: foldedSuggested };
   }
 
-  function describe(item) {
-    if (!item) return "unknown item";
-    const source = SOURCE_LABELS[item.source] || item.source || "unknown source";
-    return `"${item.title || item.id}" (${source})`;
+  // Render a green checkmark + "Link" anchor for an enrolled course column.
+  function appendPresenceLink(cell, document, href, sourceLabel) {
+    const mark = document.createElement("span");
+    mark.className = "prr-course-link__check";
+    mark.setAttribute("aria-hidden", "true");
+    mark.textContent = "✓";
+
+    if (href) {
+      const link = document.createElement("a");
+      link.className = "prr-course-link";
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      link.setAttribute("aria-label", `Open ${sourceLabel} course page`);
+      link.append(mark, document.createTextNode(" Link"));
+      cell.append(link);
+      return;
+    }
+    const span = document.createElement("span");
+    span.className = "prr-course-link prr-course-link--nolink";
+    span.title = `${sourceLabel} course found, but no course page URL is available`;
+    span.append(mark, document.createTextNode(" Link"));
+    cell.append(span);
   }
 
-  function buildTable(document, items, links, suggested, onConfirm) {
-    const names = namesByCourseKey(items);
-    const codes = [...new Set([...Object.keys(links), ...Object.keys(suggested)])].sort();
+  function firstCourseHref(items, source, keys, urls) {
+    for (const key of keys) {
+      const href = resolveCourseHref(items, source, key, urls);
+      if (href) return href;
+    }
+    return null;
+  }
+
+  function buildTable(document, items, links, suggested) {
+    const urls = urlsByCourseKey(items);
+    const folded = foldLinkRows(links, suggested);
     const table = document.createElement("table");
     const header = document.createElement("tr");
-    for (const label of ["Course", ...SOURCES.map((source) => SOURCE_LABELS[source]), "Linked"]) {
+    for (const label of ["Course", ...SOURCES.map((source) => SOURCE_LABELS[source])]) {
       const cell = document.createElement("th");
       cell.textContent = label;
       header.append(cell);
     }
     table.append(header);
-    for (const code of codes) {
-      const stored = links[code] || {};
-      const proposed = suggested[code] || {};
+    for (const code of folded.codes) {
+      const stored = folded.links[code] || {};
+      const proposed = folded.suggested[code] || {};
       const row = document.createElement("tr");
       const codeCell = document.createElement("td");
       codeCell.textContent = code;
@@ -124,22 +231,21 @@
       for (const source of SOURCES) {
         const cell = document.createElement("td");
         const keys = [...new Set([...(stored[source] || []), ...(proposed[source] || [])])];
-        cell.textContent = keys.length
-          ? keys.map((key) => names.get(key) || key).join(", ")
-          : "—";
+        if (!keys.length) {
+          cell.textContent = "—";
+        } else {
+          appendPresenceLink(
+            cell,
+            document,
+            firstCourseHref(items, source, keys, urls),
+            SOURCE_LABELS[source] || source
+          );
+        }
         row.append(cell);
       }
-      const checkCell = document.createElement("td");
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.checked = stored.confirmed === true;
-      checkbox.setAttribute("aria-label", `Link courses under ${code}`);
-      checkbox.addEventListener("change", () => onConfirm(code, checkbox.checked));
-      checkCell.append(checkbox);
-      row.append(checkCell);
       table.append(row);
     }
-    return { table, codes };
+    return { table, codes: folded.codes };
   }
 
   async function render(section) {
@@ -164,21 +270,11 @@
 
     async function refresh() {
       root.textContent = "";
-      const { items, links } = await loadData();
-      const suggested = store.suggestCourseLinks(items);
-
-      async function onConfirm(code, confirmed) {
-        const current = (await loadData()).links;
-        const entry = { ...(current[code] || {}), ...(suggested[code] || {}) };
-        for (const source of SOURCES) {
-          entry[source] = [...new Set([...(current[code]?.[source] || []), ...(suggested[code]?.[source] || [])])];
-        }
-        entry.confirmed = confirmed;
-        await globalThis.PrairieRunExt.storageLocalSet({ [LINKS_KEY]: { ...current, [code]: entry } });
-        await refresh();
-      }
-
-      const { table, codes } = buildTable(document, items, links, suggested, onConfirm);
+      const { items, links, courses: enrolledCourses } = await loadData();
+      const allEntities = [...items, ...(enrolledCourses || [])];
+      const suggested = store.suggestCourseLinks(allEntities);
+      // Multi-source rows auto-link during sync; this table is read-only.
+      const { table, codes } = buildTable(document, allEntities, links, suggested);
       if (!codes.length) {
         const empty = document.createElement("p");
         empty.className = "muted";
@@ -186,27 +282,6 @@
         root.append(empty);
       } else {
         root.append(table);
-      }
-
-      const current = (await loadData()).links;
-      const { nearMisses } = store.dedupe(items, current);
-      const missHeader = document.createElement("h3");
-      missHeader.textContent = "Possible duplicates";
-      root.append(missHeader);
-      if (!nearMisses.length) {
-        const none = document.createElement("p");
-        none.className = "muted";
-        none.textContent = "No near-misses.";
-        root.append(none);
-      } else {
-        const lookup = itemById(items);
-        const list = document.createElement("ul");
-        for (const miss of nearMisses) {
-          const entry = document.createElement("li");
-          entry.textContent = `${describe(lookup.get(miss.a))} vs ${describe(lookup.get(miss.b))}: ${miss.deltaMinutes} min apart (not merged).`;
-          list.append(entry);
-        }
-        root.append(list);
       }
     }
 
@@ -223,6 +298,13 @@
       failed.textContent = `Could not load course links: ${error?.message || error}`;
       root.append(failed);
     }
+
+    try {
+      globalThis.PrairieRunExt?.storageOnChanged?.((changes, area) => {
+        if (area && area !== "local") return;
+        if (changes[DEADLINES_KEY] || changes[LINKS_KEY] || changes[COURSES_KEY]) refresh();
+      });
+    } catch { /* ignore */ }
   }
 
   if (typeof document !== "undefined") {
@@ -232,7 +314,17 @@
     });
   }
 
-  const api = { render, migrateStoredLinks };
+  const api = {
+    render,
+    migrateStoredLinks,
+    courseHomeUrl,
+    urlsByCourseKey,
+    resolveCourseHref,
+    foldLinkRows,
+    appendPresenceLink,
+    firstCourseHref,
+    buildTable,
+  };
   globalThis.PrairieRunOptionsCourses = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })();

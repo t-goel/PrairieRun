@@ -4,7 +4,6 @@
 // PRAIRIERUN_AUTH_* / PRAIRIERUN_SYNC_NOW).
 const notificationLeadElement = typeof document !== "undefined" ? document.querySelector("#notification-lead-hours") : null;
 const completionThresholdElement = typeof document !== "undefined" ? document.querySelector("#completion-threshold") : null;
-const resetDataButton = typeof document !== "undefined" ? document.querySelector("#reset-data") : null;
 const authStatusElement = typeof document !== "undefined" ? document.querySelector("#auth-status") : null;
 const authConnectButton = typeof document !== "undefined" ? document.querySelector("#auth-connect") : null;
 const authDisconnectButton = typeof document !== "undefined" ? document.querySelector("#auth-disconnect") : null;
@@ -28,7 +27,8 @@ function showStatus(text, error = false) {
 // Firefox-only OAuth-client errors and setup notices are suppressed from the
 // main Sources card status line.
 function isSuppressedSyncMessage(text) {
-  return /googleClientId|Firefox needs its own Google OAuth client|Google direct sync needs the Firefox client ID/i.test(text || "");
+  // Direct Google sync UI is hidden; suppress OAuth/client and leftover Connect prompts.
+  return /googleClientId|Firefox needs its own Google OAuth client|Google direct sync needs the Firefox client ID|Connect Google Calendar|Synchronizing Google Calendar|Checking Google Calendar|Google Calendar synced|Google Calendar checked/i.test(text || "");
 }
 function friendlySyncMessage(text) {
   if (isSuppressedSyncMessage(text)) return "";
@@ -69,9 +69,11 @@ function refreshState() {
     } else if (response.sync?.state === "scanning") {
       showStatus(`${raw || "Scanning…"} (${response.sync.found || 0} found)`);
     } else if (response.sync?.state === "syncing") {
-      showStatus(raw || "Synchronizing Google Calendar…");
+      const msg = friendlySyncMessage(raw || "Synchronizing…");
+      showStatus(msg);
     } else if (response.sync?.state === "auth_required") {
-      showStatus(raw || "Connect Google Calendar to sync.", true);
+      // Direct Google sync is hidden; do not nudge Connect.
+      showStatus("");
     } else if (response.sync?.state === "error") {
       showStatus(raw || "Sync failed.", true);
     } else {
@@ -206,7 +208,9 @@ function rowForSource(source, entry) {
     button.addEventListener("click", async () => {
       button.disabled = true;
       try {
-        await grantSourcePermission(source);
+        const granted = await grantSourcePermission(source);
+        if (!granted) showStatus(permissionHelpMessage(source), true);
+        else syncNowButton?.click();
       } catch (error) {
         showStatus(error.message, true);
       } finally {
@@ -219,10 +223,61 @@ function rowForSource(source, entry) {
   sourcesListElement.appendChild(row);
 }
 
+function hostLabelForSource(source) {
+  const raw = Array.isArray(source?.origins) && source.origins[0] ? String(source.origins[0]) : "";
+  try {
+    if (raw.includes("*")) {
+      // https://*.illinois.edu/* → *.illinois.edu
+      const match = raw.match(/^https?:\/\/([^/]+)/i);
+      return match ? match[1] : raw;
+    }
+    return new URL(raw.includes("://") ? raw : `https://${raw}`).host;
+  } catch {
+    return raw || "this site";
+  }
+}
+
+function permissionHelpMessage(source) {
+  const label = source.label || source.id;
+  const host = hostLabelForSource(source);
+  if (PrairieRunExt.isBrave) {
+    return `${label}: Brave blocked the permission popup. Open brave://extensions → PrairieRun → Details → Site access, allow ${host} (or On all sites), then click Grant access again.`;
+  }
+  return `${label} needs access to ${host}. If no prompt appeared, open chrome://extensions → PrairieRun → Details → Site access and allow ${host}, then try Grant access again.`;
+}
+
 async function grantSourcePermission(source) {
   if (!source.origins?.length) return false;
   try {
-    return await PrairieRunExt.permissionsRequest(source.origins);
+    const granted = await PrairieRunExt.permissionsRequest(source.origins);
+    if (granted) return true;
+  } catch {
+    // Fall through to the site-tab / host-access-request path.
+  }
+
+  // Brave (and Chrome with withheld hosts) often suppress permissions.request.
+  // Open the site and, when available, show the toolbar "Allow" chip
+  // (permissions.addHostAccessRequest, Chrome 133+).
+  const siteUrl = source.signInUrl
+    || (typeof source.origins?.[0] === "string" && !String(source.origins[0]).includes("*")
+      ? String(source.origins[0]).replace(/\/?$/, "/")
+      : null);
+  if (siteUrl && typeof PrairieRunExt.tabsCreate === "function") {
+    try {
+      const tab = await PrairieRunExt.tabsCreate({ url: siteUrl, active: true });
+      if (tab?.id != null && typeof PrairieRunExt.permissionsAddHostAccessRequest === "function") {
+        await PrairieRunExt.permissionsAddHostAccessRequest({
+          tabId: tab.id,
+          pattern: source.origins[0],
+        });
+      }
+    } catch {
+      // Opening the site is best-effort; the Site access message still helps.
+    }
+  }
+
+  try {
+    return Boolean(await PrairieRunExt.permissionsContains(source.origins));
   } catch {
     return false;
   }
@@ -243,20 +298,20 @@ async function toggleSource(source, toggle) {
   // Enabling a source first needs its host permission; the toggle click is
   // the user gesture that lets us ask.
   if (want && source.origins?.length) {
-    let granted = true;
+    let granted = false;
     try {
       granted = await PrairieRunExt.permissionsContains(source.origins);
     } catch {
-      granted = true;
+      granted = false;
     }
     if (!granted) {
       granted = await grantSourcePermission(source);
       if (!granted) {
-        // The permission prompt was dismissed; the toggle stays off. A later
-        // sync attempt records disabled:permission, which surfaces the
-        // permanent "Grant access" affordance on the row.
+        // Prompt dismissed or Brave suppressed it; keep the toggle off and
+        // surface Site access guidance. A later sync still records
+        // disabled:permission for the Grant access button.
         toggle.checked = false;
-        showStatus(`${source.label || source.id} needs browser permission to scan. Grant access to enable it.`, true);
+        showStatus(permissionHelpMessage(source), true);
         return;
       }
     }
@@ -318,14 +373,13 @@ function monitorRefresh(attempt = 0) {
 
 if (typeof document !== "undefined") {
   refreshState();
-  refreshAuthStatus();
+  // Direct Google sync card is hidden; skip auth status polling.
 }
 
 if (typeof PrairieRunExt !== "undefined" && typeof PrairieRunExt.addStorageChangedListener === "function") {
   PrairieRunExt.addStorageChangedListener((changes, areaName) => {
     if (areaName === "local" && changes.prairierunSyncStatus) {
       refreshState();
-      refreshAuthStatus();
     }
     if (areaName === "local" && changes.prairierunSourceStatus) {
       refreshState();
@@ -356,19 +410,6 @@ if (completionThresholdElement) {
     await saveSettings();
     showStatus("Refreshing assignments…");
     monitorRefresh();
-  });
-}
-
-if (resetDataButton) {
-  resetDataButton.addEventListener("click", async () => {
-    if (!confirm("Clear PrairieRun assignments, sync state, calendar mappings, settings, and cached authorization?")) return;
-    resetDataButton.disabled = true;
-    await PrairieRunExt.storageLocalClear();
-    await PrairieRunExt.clearSessionValues();
-    resetDataButton.disabled = false;
-    applySettings({ notificationLeadMinutes: 240, completionThreshold: 95 });
-    showStatus("Test data cleared. Refresh PrairieLearn to scan again.");
-    refreshAuthStatus();
   });
 }
 

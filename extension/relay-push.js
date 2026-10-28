@@ -13,6 +13,7 @@
   const STATUS_KEY = "prairierunRelayStatus";
   const SEQUENCES_KEY = "prairierunIcsSequences";
   const SETTINGS_KEY = "prairierunSettings";
+  const COURSE_FEEDS_KEY = "prairierunCourseFeeds";
   // Bundled relay scaffold's default deployment; used when the user has not
   // configured a custom relay URL.
   const DEFAULT_RELAY_URL = "https://prairierun-feed.vercel.app";
@@ -54,7 +55,7 @@
       now: new Date(),
       sequences: storedSequences || {},
       eventShape: outputSettings.eventShape || "block1h",
-      leadMinutes: outputSettings.leadMinutes !== undefined ? outputSettings.leadMinutes : 240,
+      leadMinutes: outputSettings.leadMinutes !== undefined ? outputSettings.leadMinutes : (Number(settings?.notificationLeadMinutes) || 240),
       nightBefore: Boolean(outputSettings.nightBefore),
       nightBeforeHour: outputSettings.nightBeforeHour != null ? outputSettings.nightBeforeHour : 20,
       includeCompleted: outputSettings.includeCompleted !== false,
@@ -165,6 +166,84 @@
   // Background auto-publish, called from PrairieRunOutputs.run after every
   // successful source sync. Silent: missing permission or config is recorded
   // but never interrupts the sync pipeline.
+  const FEED_ID_RE = /^[a-z0-9][a-z0-9-]{5,63}$/;
+
+  function slugCourse(code) {
+    return String(code || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 20);
+  }
+
+  async function readCourseFeeds() {
+    try {
+      const stored = (await ext()?.storageLocalGet?.([COURSE_FEEDS_KEY])) || {};
+      const value = stored[COURSE_FEEDS_KEY];
+      return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function courseFeedId(feedId, slug) {
+    const safeSlug = String(slug || "course").slice(0, 20);
+    const maxBase = Math.max(6, 64 - 1 - safeSlug.length);
+    const base = String(feedId || "").toLowerCase().slice(0, maxBase);
+    return `${base}-${safeSlug}`;
+  }
+
+  async function publishPerCourse(items, { settings, secrets } = {}) {
+    const config = readFeedConfig(settings, { prairierunSecrets: secrets });
+    if (!config.configured) return { ok: false, courseFeeds: {}, error: "Feed not configured." };
+    const key = secrets?.relayPublishKey || config.publishKey;
+    if (!key) return { ok: false, courseFeeds: {}, error: "Publish key missing." };
+
+    const groups = new Map();
+    for (const item of items || []) {
+      const code = String(item?.courseCode || item?.courseName || "uncategorized").trim() || "uncategorized";
+      if (!groups.has(code)) groups.set(code, []);
+      groups.get(code).push(item);
+    }
+    if (!groups.size) return { ok: true, courseFeeds: {}, error: "" };
+
+    let storedSequences = {};
+    try {
+      const stored = (await ext()?.storageLocalGet?.([SEQUENCES_KEY])) || {};
+      storedSequences = stored[SEQUENCES_KEY] && typeof stored[SEQUENCES_KEY] === "object" ? stored[SEQUENCES_KEY] : {};
+    } catch { /* sequences optional for per-course builds */ }
+    const courseFeeds = {};
+    const errors = [];
+    for (const [code, groupItems] of groups) {
+      const slug = slugCourse(code) || "course";
+      const courseId = courseFeedId(config.feedId, slug);
+      if (!FEED_ID_RE.test(courseId)) { errors.push(`${code}: invalid feed id`); continue; }
+      const { text } = buildIcs(groupItems, settings, storedSequences);
+      try {
+        const response = await fetch(`${config.relayUrl}/api/publish`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-prairierun-key": key },
+          body: JSON.stringify({ feedId: courseId, ics: text }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data?.ok || !data?.url) {
+          errors.push(`${code}: ${data?.error || response.status}`);
+          continue;
+        }
+        courseFeeds[code] = data.url;
+      } catch (error) {
+        errors.push(`${code}: ${error?.message || error}`);
+      }
+    }
+
+    try {
+      const previous = await readCourseFeeds();
+      await ext()?.storageLocalSet?.({ [COURSE_FEEDS_KEY]: { ...previous, ...courseFeeds } });
+    } catch { /* best effort */ }
+
+    return { ok: errors.length === 0, courseFeeds, error: errors.join("; ") };
+  }
+
   async function autoPublish(items, settings = {}) {
     const api = ext();
     if (!api || !globalThis.PrairieRunIcsWriter) return { skipped: "unavailable" };
@@ -204,7 +283,10 @@
         return { skipped: "needs_permission" };
       }
     }
-    return publish(items, { settings: stored[SETTINGS_KEY] || settings, secrets: secrets.prairierunSecrets || {} });
+    const combined = await publish(items, { settings: stored[SETTINGS_KEY] || settings, secrets: secrets.prairierunSecrets || {} });
+    // Also publish one feed per course so calendar apps can subscribe/color separately.
+    const perCourse = await publishPerCourse(items, { settings: stored[SETTINGS_KEY] || settings, secrets: secrets.prairierunSecrets || {} });
+    return { ...combined, perCourse };
   }
 
   // One-click activation: mints { feedId, key } from the relay's /api/claim.
@@ -258,10 +340,27 @@
     // even without host permission. Requires PrairieRunIcsWriter. `secrets`
     // is the prairierunSecrets object ({ relayPublishKey: "..." }).
     if (!globalThis.PrairieRunIcsWriter) return { ok: false, status: "error", error: "ICS writer unavailable." };
-    return publish(items, { settings, secrets: secrets || {} });
+    const payload = { settings, secrets: secrets || {} };
+    const combined = await publish(items, payload);
+    if (!combined.ok) return combined;
+    const perCourse = await publishPerCourse(items, payload);
+    return { ...combined, perCourse };
   }
 
-  const api = { publish, autoPublish, hasRelayPermission, publishFromUserGesture, claimFeed, readState, readFeedConfig, DEFAULT_RELAY_URL };
+  const api = {
+    publish,
+    autoPublish,
+    publishPerCourse,
+    readCourseFeeds,
+    courseFeedId,
+    slugCourse,
+    hasRelayPermission,
+    publishFromUserGesture,
+    claimFeed,
+    readState,
+    readFeedConfig,
+    DEFAULT_RELAY_URL,
+  };
   globalThis.PrairieRunRelay = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })();

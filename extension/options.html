@@ -1,21 +1,23 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PrairieRun</title>
+    <title>PrairieRun Settings</title>
     <link rel="stylesheet" href="options.css" />
   </head>
   <body>
     <main>
       <header class="page-head">
-        <span class="brand-mark" aria-hidden="true">PR</span>
-        <h1>PrairieRun</h1>
+        <div class="brand-mark" aria-hidden="true">PR</div>
+        <div>
+          <h1>PrairieRun Settings</h1>
+        </div>
       </header>
 
       <div class="page-grid">
-        <section class="card settings-card">
-          <h2>Settings</h2>
+        <section class="card settings-card" id="output-settings">
+          <h2>Calendar reminders</h2>
           <div class="field-row">
             <label for="completion-threshold">Complete above <input id="completion-threshold" type="number" min="0" max="100" step="1" value="95" />%</label>
             <label for="notification-lead-hours">Notify me <input id="notification-lead-hours" type="number" min="0" max="168" step="0.25" value="4" /> hours before due</label>
@@ -26,7 +28,8 @@
           <h2>Calendar feed</h2>
         </section>
 
-        <section class="card auth-card" id="auth-card">
+        <!-- Direct Google OAuth sync is hidden for now; Calendar feed is the path. -->
+        <section class="card auth-card" id="auth-card" hidden>
           <h2>Google Calendar</h2>
           <div class="auth-row">
             <p id="auth-status" class="muted">Checking connection…</p>
@@ -46,16 +49,29 @@
           </details>
         </section>
 
-        <section class="card sources-card" id="sources">
+        <section class="card" id="sources">
           <div class="sources-head">
             <h2>Sources</h2>
-            <button id="sync-now" class="secondary sync-now">Sync now</button>
+            <button id="sync-now" class="secondary sync-now" type="button">Sync now</button>
           </div>
-          <p id="sync-status" class="muted" hidden></p>
-          <ul id="sources-list" class="sources-list"></ul>
+          <p id="sync-status" class="muted" data-pr-sync-status>Checking sources…</p>
+          <ul class="sources-list" id="sources-list"></ul>
         </section>
 
-        <section class="card" id="canvas-settings">
+        <section class="card" id="course-websites">
+          <h2>Course websites</h2>
+          <form id="course-websites-form" class="course-websites-form">
+            <label for="course-website-url">Add a UIUC course page</label>
+            <div class="course-websites-add">
+              <input id="course-website-url" type="url" placeholder="https://courses.grainger.illinois.edu/cs425/fa2026/assignments.html" required />
+              <button class="secondary" type="submit">Add page</button>
+            </div>
+          </form>
+          <ul id="course-websites-list" class="course-websites-list"></ul>
+          <p id="course-websites-status" class="muted" hidden></p>
+        </section>
+
+        <section class="card" id="canvas-setup" hidden>
           <h2>Canvas</h2>
         </section>
 
@@ -63,18 +79,18 @@
           <h2>Course links</h2>
         </section>
 
-        <section class="card data-card">
-          <h2>Data</h2>
-          <button id="reset-data" class="secondary">Clear test data</button>
-        </section>
       </div>
     </main>
     <script src="compat.js"></script>
     <script src="deadline-model.js"></script>
+    <script src="source-registry.js"></script>
+    <script src="source-courseweb.js"></script>
     <script src="ics-writer.js"></script>
     <script src="relay-push.js"></script>
+    <script src="feed-auth.js"></script>
     <script src="options.js"></script>
     <script src="options-dashboard.js"></script>
+    <script src="options-courseweb.js"></script>
     <script src="options-canvas.js"></script>
     <script src="options-courses.js"></script>
     <script src="options-feed.js"></script>

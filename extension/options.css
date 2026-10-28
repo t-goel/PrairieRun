@@ -66,7 +66,8 @@ button.secondary { border: 1px solid #c8d0d9; background: #fff; color: #405263; 
 .settings-card label { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; }
 .settings-card input[type="number"] { width: 56px; border: 0; border-radius: 4px; padding: 5px 6px; color: #17202a; font: inherit; text-align: center; }
 
-/* Google Calendar card */
+/* Google Calendar card (hidden while direct OAuth sync is off) */
+.auth-card[hidden] { display: none !important; }
 .auth-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .auth-row .muted { flex: 1; font-size: 13px; color: #243444; font-weight: 600; }
 .auth-card .muted.error { font-weight: 400; margin-top: 6px; }
@@ -84,6 +85,14 @@ button.secondary { border: 1px solid #c8d0d9; background: #fff; color: #405263; 
 .sources-head > h2 { margin: 0; }
 button.sync-now { width: auto; padding: 7px 12px; font-size: 12px; }
 .sources-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.course-websites-form label { display: block; font-weight: 600; }
+.course-websites-add { display: flex; align-items: center; gap: 8px; }
+.course-websites-add input { flex: 1; min-width: 0; }
+.course-websites-add button { flex: 0 0 auto; margin-top: 8px; }
+.course-websites-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+.course-website-row { display: flex; align-items: center; gap: 8px; border-top: 1px solid #edf1f5; padding-top: 7px; }
+.course-website-row a { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.course-website-row button { margin: 0; padding: 5px 9px; }
 .source-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .source-toggle {
   appearance: none;
@@ -139,9 +148,27 @@ button.source-action { width: 100%; padding: 6px 10px; font-size: 11px; }
 .prr-feed-config button { margin: 10px 0 0; }
 .prr-feed-config .muted { margin-top: 8px; }
 .prr-feed-url-row { margin: 0 0 10px; }
+.prr-feed-url-label,
+.prr-course-feed-label {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  color: #243444;
+  min-width: 4.5em;
+}
+.prr-feed-url-label[hidden] { display: none !important; }
+.prr-course-feeds { margin: 0 0 10px; display: grid; gap: 6px; }
+.prr-course-feeds[hidden] { display: none !important; }
+.prr-course-feed-row { margin-top: 0; }
+.prr-course-feed-row button { margin: 0; }
 .card label { font-size: 13px; }
 .card button { margin: 10px 8px 0 0; }
 
+.pr-canvas-connected { margin-top: 10px; }
+.pr-canvas-connected .muted { margin: 0; }
+.pr-canvas-setup[hidden], .pr-canvas-connected[hidden] { display: none !important; }
+.pr-canvas-setup-actions { display: flex; flex-wrap: wrap; gap: 0 8px; }
+.pr-canvas-setup-actions button { margin: 10px 0 0; }
 .pr-canvas-error { color: #a32929; font-size: 12px; margin: 8px 0 0; }
 .pr-canvas-warn { color: #8a5a00; font-size: 12px; margin: 8px 0 0; }
 
@@ -149,11 +176,22 @@ button.source-action { width: 100%; padding: 6px 10px; font-size: 11px; }
 .card th, .card td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #edf1f5; vertical-align: top; }
 .card th { font-size: 11px; text-transform: none; color: #607080; font-weight: 700; }
 .card td:first-child { font-weight: 700; }
+.card td a { color: #0b57d0; text-decoration: none; }
+.card td a:hover { text-decoration: underline; }
+.prr-course-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: #206020;
+  text-decoration: none;
+}
+.prr-course-link:hover { text-decoration: underline; }
+.prr-course-link__check { color: #1a7f37; font-weight: 700; }
+.prr-course-link--nolink { color: #607080; cursor: default; }
+.prr-course-link--nolink .prr-course-link__check { color: #607080; }
 .card ul, .card ol { margin: 8px 0 0; padding-left: 18px; font-size: 12px; color: #405263; }
 .card h3 { margin: 14px 0 4px; font-size: 12px; }
-
-/* Data */
-.data-card button { border-color: #e0b4b4; color: #a32929; }
 
 /* Calendar feed card: hidden-attribute override (a display:flex rule on
    auth-redirect-row would otherwise keep the URL row visible when it has no

@@ -3,8 +3,10 @@
 // canvas.illinois.edu host permission from the click), a password field for
 // the secret calendar feed URL (storage.local prairierunSecrets.canvasFeedUrl,
 // displayed masked), and the optional planner-API checkbox.
-// All extension APIs go through PrairieRunExt; nothing here touches chrome.*.
-// Plain IIFE script; no bundler.
+// Before a feed URL is saved, shows the paste/save setup form. After it is
+// saved, shows a compact connected status with Change/Clear instead of the
+// onboarding form. All extension APIs go through PrairieRunExt; nothing here
+// touches chrome.*. Plain IIFE script; no bundler.
 (function () {
   const CANVAS_PERMISSION = "https://canvas.illinois.edu/*";
   const ILLINOIS_FEED_RE = /^https:\/\/canvas\.illinois\.edu\/feeds\/calendars\/user_[A-Za-z0-9]+\.ics$/;
@@ -114,6 +116,11 @@
     node.className = kind === "error" ? "pr-canvas-error" : kind === "warn" ? "pr-canvas-warn" : "muted";
   }
 
+  function setHidden(node, hidden) {
+    if (hidden) node.setAttribute("hidden", "hidden");
+    else node.removeAttribute("hidden");
+  }
+
   async function render(section) {
     if (!section || typeof document === "undefined") return;
     // Idempotent: drop our previous render and PR 1's "Coming soon" note.
@@ -122,11 +129,17 @@
 
     const root = make("div", { "data-pr-canvas": "1" });
     const message = make("p", { className: "muted", "data-pr-canvas-message": "1" });
-    const enableLabel = make("label", {});
-    const enableBox = make("input", { type: "checkbox", "data-pr-canvas-enabled": "1" });
-    enableLabel.append(enableBox, document.createTextNode(" Enable Canvas"));
-
+    // Connected summary (shown when a feed URL is already saved).
+    const connected = make("div", { className: "auth-row pr-canvas-connected", "data-pr-canvas-connected": "1" });
     const savedLine = make("p", { className: "muted", "data-pr-canvas-saved": "1" });
+    const connectedButtons = make("div", { className: "auth-buttons" });
+    const changeButton = make("button", { type: "button", className: "secondary", "data-pr-canvas-change": "1" }, "Change");
+    const clearButton = make("button", { type: "button", className: "secondary", "data-pr-canvas-clear": "1" }, "Clear");
+    connectedButtons.append(changeButton, clearButton);
+    connected.append(savedLine, connectedButtons);
+
+    // First-time / change setup form.
+    const setup = make("div", { className: "pr-canvas-setup", "data-pr-canvas-setup": "1" });
     const feedInput = make("input", {
       type: "password",
       autocomplete: "off",
@@ -134,51 +147,64 @@
       placeholder: "Paste Canvas calendar feed URL (…/feeds/calendars/user_….ics)",
       "data-pr-canvas-feed": "1",
     });
-    feedInput.style.width = "100%";
-    const saveButton = make("button", { type: "button" }, "Save feed URL");
-    const clearButton = make("button", { type: "button" }, "Clear");
-    const buttonRow = make("div", {});
-    buttonRow.append(saveButton, document.createTextNode(" "), clearButton);
+    const setupButtons = make("div", { className: "pr-canvas-setup-actions" });
+    const saveButton = make("button", { type: "button", "data-pr-canvas-save": "1" }, "Save feed URL");
+    const cancelButton = make("button", {
+      type: "button",
+      className: "secondary",
+      "data-pr-canvas-cancel": "1",
+      hidden: "hidden",
+    }, "Cancel");
+    setupButtons.append(saveButton, cancelButton);
+    setup.append(feedInput, setupButtons);
 
     const plannerLabel = make("label", {});
     const plannerBox = make("input", { type: "checkbox", "data-pr-canvas-planner": "1" });
     plannerLabel.append(plannerBox, document.createTextNode(" Use Canvas session for submission status (planner API)"));
 
-    root.append(enableLabel, savedLine, feedInput, buttonRow, plannerLabel, message);
+    root.append(connected, setup, plannerLabel, message);
     section.appendChild(root);
 
-    async function refreshSaved() {
+    let editing = false;
+
+    async function applyView() {
       const current = await loadFeedUrl();
-      savedLine.textContent = current ? `Saved feed: ${maskFeedUrl(current)}` : "No feed URL saved.";
+      const configured = Boolean(current);
+      if (configured && !editing) {
+        savedLine.textContent = `Feed connected · ${maskFeedUrl(current)}`;
+        setHidden(connected, false);
+        setHidden(setup, true);
+        setHidden(cancelButton, true);
+        feedInput.value = "";
+      } else {
+        setHidden(connected, true);
+        setHidden(setup, false);
+        // Cancel only when replacing an already-saved feed.
+        setHidden(cancelButton, !(configured && editing));
+        if (!configured) {
+          savedLine.textContent = "";
+          editing = false;
+        }
+      }
     }
 
     const canvas = await loadCanvasSettings();
-    enableBox.checked = canvas.enabled;
     plannerBox.checked = canvas.plannerApi;
-    await refreshSaved();
+    await applyView();
 
-    enableBox.addEventListener("change", async () => {
-      const want = enableBox.checked;
-      if (want) {
-        let granted = false;
-        try {
-          granted = await ext()?.permissionsRequest?.([CANVAS_PERMISSION]);
-        } catch {
-          granted = false;
-        }
-        if (!granted) {
-          enableBox.checked = false;
-          setMessage(message, "Canvas needs the canvas.illinois.edu permission; the toggle stays off until it is granted.", "error");
-          return;
-        }
-      }
-      try {
-        await saveCanvasSettings({ enabled: want });
-        setMessage(message, want ? "Canvas enabled." : "Canvas disabled.", null);
-      } catch {
-        enableBox.checked = !want;
-        setMessage(message, "Could not save the Canvas setting.", "error");
-      }
+    changeButton.addEventListener("click", async () => {
+      editing = true;
+      feedInput.value = "";
+      setMessage(message, "", null);
+      await applyView();
+      try { feedInput.focus(); } catch { /* fake DOM has no focus */ }
+    });
+
+    cancelButton.addEventListener("click", async () => {
+      editing = false;
+      feedInput.value = "";
+      setMessage(message, "", null);
+      await applyView();
     });
 
     saveButton.addEventListener("click", async () => {
@@ -194,7 +220,8 @@
       try {
         await saveFeedUrl(url);
         feedInput.value = "";
-        await refreshSaved();
+        editing = false;
+        await applyView();
         await triggerResync();
         if (ILLINOIS_FEED_RE.test(url)) {
           setMessage(message, "Feed URL saved.", null);
@@ -210,7 +237,8 @@
       try {
         await saveFeedUrl("");
         feedInput.value = "";
-        await refreshSaved();
+        editing = false;
+        await applyView();
         await triggerResync();
         setMessage(message, "Feed URL cleared.", null);
       } catch {
@@ -232,8 +260,11 @@
 
   if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
     document.addEventListener("DOMContentLoaded", () => {
-      const section = document.getElementById("canvas-settings");
-      if (section) render(section);
+      const section = document.getElementById("canvas-setup");
+      if (section) {
+        section.removeAttribute("hidden");
+        render(section);
+      }
     });
   }
 

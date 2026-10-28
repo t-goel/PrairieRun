@@ -222,7 +222,7 @@
   const adapter = {
     id: "canvas",
     label: "Canvas",
-    origins: [CANVAS_ORIGIN],
+    origins: [`${CANVAS_ORIGIN}/*`],
     signInUrl: `${CANVAS_ORIGIN}/`,
     parsers: {},
     isSignedOut(fetchResult) {

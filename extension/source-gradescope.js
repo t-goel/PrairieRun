@@ -14,13 +14,13 @@
 
   // Named selectors (unverified on UIUC; see note above).
   const SEL_ACCOUNT_SHOW = "#account-show";
-  const SEL_PAGE_HEADING = "h2.pageHeading";
+  const SEL_PAGE_HEADING = ".pageHeading, h1.pageHeading, h2.pageHeading";
   const SEL_COURSE_LIST = "div.courseList";
   const SEL_TERM = ".courseList--term";
   const SEL_COURSES_FOR_TERM = ".courseList--coursesForTerm";
   const SEL_COURSE_BOX = "a.courseBox";
   const SEL_COURSE_BOX_NEW = ".courseBox-new";
-  const SEL_SHORT_NAME = "h3.courseBox--shortname";
+  const SEL_SHORT_NAME = ".courseBox--shortname";
   const SEL_FULL_NAME = ".courseBox--name";
   const SEL_COURSE_TITLE = ".courseHeader--title, h1";
   const SEL_DATA_ROW = 'tr[role="row"]';
@@ -35,7 +35,17 @@
   const COURSE_ID_FROM_HREF = /^\/courses\/(\d+)/;
   const SUBMISSION_ID_FROM_HREF = /^\/courses\/\d+\/assignments\/(\d+)\/submissions\//;
   const SCORE_TEXT = /(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/;
-  const COURSE_CODE = /\b([A-Z]{2,4})\s*(\d{3}[A-Z]?)\b/;
+  // Term designators (e.g. "Fall 2026", "FA2026", "SP26") must not be treated
+  // as subject + course code.
+  const TERM_SUBJECTS = new Set([
+    "FA", "FALL", "SP", "SPRING", "SU", "SUMMER", "WI", "WIN", "WINTER", "AU", "AUTUMN",
+  ]);
+  // Course codes may sit after a term/prefix and separators that are word
+  // characters in JS (`fa26_cs425`), so do not rely on `\b`. Match SUBJ +
+  // 3 digits + up to 3 trailing section chars, aligned with
+  // deadline-store.normalizeCourseCode / model.courseCodeFromName.
+  const COURSE_CODE = /(?:^|[^A-Z0-9])([A-Z]{2,4})[\s_-]*(\d{3}[A-Z0-9]{0,3})(?![A-Z0-9])/;
+  const COURSE_CODE_GLOBAL = /(?:^|[^A-Z0-9])([A-Z]{2,4})[\s_-]*(\d{3}[A-Z0-9]{0,3})(?![A-Z0-9])/gi;
   const NO_ASSIGNMENTS_MESSAGE = /no assignments/i;
 
   function textOf(node) {
@@ -85,14 +95,14 @@
     for (const node of ordered) {
       if (node.matches && node.matches(SEL_PAGE_HEADING)) {
         const heading = textOf(node).toLowerCase();
-        if (heading.includes("student")) section = "student";
+        if (heading.includes("student") || heading.includes("your courses") || heading === "courses") section = "student";
         else if (heading.includes("instructor")) section = "instructor";
         else section = null;
       } else if (section === "student" && boxes.includes(node)) {
         kept.push(node);
       }
     }
-    return kept;
+    return kept.length ? kept : boxes;
   }
 
   // Current term only: the first .courseList--term block and its sibling
@@ -144,65 +154,46 @@
 
   function isHeaderRow(row, index) {
     if (row.querySelector && row.querySelector(SEL_COLUMN_HEADER)) return true;
-    if (index !== 0) return false;
-    // First row without explicit column headers: treat it as a header when it
-    // carries no assignment evidence (no times, no submission link, no
-    // submit button).
-    const hasEvidence =
-      (row.querySelector && (row.querySelector("time[datetime]") ||
-        row.querySelector(SEL_SUBMISSION_LINK) ||
-        row.querySelector(SEL_SUBMIT_BUTTON)));
-    return !hasEvidence;
-  }
-
-  function isDropzoneTail(row) {
-    if (row.classList && row.classList.contains("dropzonePreview")) return true;
-    if (row.querySelector && row.querySelector(SEL_DROPZONE)) {
-      const hasTitle = row.querySelector("th") && textOf(row.querySelector("th"));
-      const hasTime = row.querySelector("time[datetime]");
-      return !hasTitle && !hasTime;
-    }
+    if (index === 0 && row.querySelectorAll && row.querySelectorAll("th").length >= 2) return true;
     return false;
   }
 
   function parseCourse(document, url) {
-    let courseId = null;
-    try {
-      courseId = String(url || "").match(/\/courses\/(\d+)/)?.[1] || null;
-    } catch {
-      courseId = null;
-    }
+    const courseId = courseIdFromHref(url ? new URL(url).pathname : "") || "unknown";
     const titleNode = document?.querySelector ? document.querySelector(SEL_COURSE_TITLE) : null;
     const courseName = textOf(titleNode);
+
     let rows = document?.querySelectorAll ? [...document.querySelectorAll(SEL_DATA_ROW)] : [];
     if (!rows.length && document?.querySelectorAll) {
       rows = [...document.querySelectorAll(SEL_ROW_FALLBACK)];
     }
+
     const parsed = [];
     rows.forEach((row, index) => {
       if (isHeaderRow(row, index)) return;
-      if (isDropzoneTail(row)) return;
-      const cells = row.querySelectorAll ? [...row.querySelectorAll("th, td")] : [];
-      const titleCell = (row.querySelector && row.querySelector("th")) || cells[0] || null;
-      const statusCell = cells[1] || null;
-      const dateCell = cells[2] || null;
-      const scope = titleCell || row;
-      const title = textOf(titleCell);
+      if (row.matches && row.matches(SEL_DROPZONE)) return;
+      if (row.querySelector && row.querySelector(SEL_DROPZONE)) return;
+
+      const cells = row.children ? [...row.children] : [];
+      if (!cells.length) return;
+
+      const titleCell = cells[0];
+      const titleLink = titleCell?.querySelector ? titleCell.querySelector("a") : null;
+      const submissionLink = row.querySelector ? row.querySelector(SEL_SUBMISSION_LINK) : null;
+      const submitButton = row.querySelector ? row.querySelector(SEL_SUBMIT_BUTTON) : null;
+
+      const title = textOf(titleLink || titleCell);
       if (!title) return;
 
-      let assignmentId = null;
-      const submissionLink = scope.querySelector ? scope.querySelector(SEL_SUBMISSION_LINK) : null;
-      if (submissionLink) {
-        assignmentId = assignmentIdFromSubmissionHref(submissionLink.getAttribute("href"));
-      }
-      if (!assignmentId) {
-        const button = scope.querySelector ? scope.querySelector(SEL_SUBMIT_BUTTON) : null;
-        // Attribute is read only; the button is never clicked or triggered.
-        const raw = button?.getAttribute ? button.getAttribute("data-assignment-id") : null;
-        if (raw && /^\d+$/.test(String(raw).trim())) assignmentId = String(raw).trim();
-      }
+      const submissionHref = (submissionLink || titleLink)?.getAttribute?.("href") || "";
+      const assignmentIdFromLink = assignmentIdFromSubmissionHref(submissionHref);
+      const assignmentIdFromBtn = submitButton?.getAttribute?.("data-assignment-id") || null;
+      const assignmentId = assignmentIdFromLink || assignmentIdFromBtn || null;
 
-      const statusText = textOf(statusCell);
+      const statusCell = cells.length >= 2 ? cells[1] : null;
+      const statusText = textOf(statusCell) || null;
+
+      const dateCell = cells.length >= 3 ? cells[2] : null;
       const dateScope = dateCell || row;
       const releaseNode = dateScope.querySelector ? dateScope.querySelector(SEL_RELEASE_TIME) : null;
       const dueNodes = dateScope.querySelectorAll ? [...dateScope.querySelectorAll(SEL_DUE_TIME)] : [];
@@ -216,10 +207,39 @@
     return { courseName, rows: parsed };
   }
 
+  // Extract a course code from a Gradescope short name, full name, or page
+  // title. Returns "CS 425" / "CS 425DK" style (space after subject) or null.
+  // Skips term designators such as "Fall 2026", "FA2026", "SP 2026", "FA26".
+  function courseCodeFromLabel(label) {
+    const text = String(label || "").toUpperCase();
+    if (!text) return null;
+    for (const match of text.matchAll(COURSE_CODE_GLOBAL)) {
+      const subj = match[1];
+      const num = match[2];
+      if (TERM_SUBJECTS.has(subj) && /^20\d{2}$|^\d{2}$/.test(num)) continue;
+      return `${subj} ${num}`;
+    }
+    return null;
+  }
+
+  // Prefer shortName, then fullName, then the course-page heading. Title-only
+  // short names ("Distributed Systems") still resolve when the full name or
+  // page title carries the code.
+  function resolveCourseCode(course, pageCourseName) {
+    for (const candidate of [course?.shortName, course?.fullName, pageCourseName]) {
+      const code = courseCodeFromLabel(candidate);
+      if (code) return code;
+    }
+    return null;
+  }
+
+  function resolveCourseName(course, pageCourseName) {
+    return String(course?.shortName || course?.fullName || pageCourseName || "").trim();
+  }
+
+  // Back-compat alias used by older tests / call sites.
   function courseCodeFromShortName(shortName) {
-    const match = String(shortName || "").toUpperCase().match(COURSE_CODE);
-    if (!match) return null;
-    return `${match[1]} ${match[2]}`;
+    return courseCodeFromLabel(shortName);
   }
 
   function slugifyTitle(title) {
@@ -245,7 +265,7 @@
     return { status: "unknown", score: null };
   }
 
-  function rowToDeadlineItem(row, course, checkedAt) {
+  function rowToDeadlineItem(row, course, checkedAt, pageCourseName) {
     const courseId = course.id;
     const url = row.assignmentId
       ? `${ORIGIN}/courses/${courseId}/assignments/${row.assignmentId}`
@@ -259,15 +279,16 @@
       ? row.rawDueText
       : (row.rawDueText ? `${row.rawDueText} [unstableId:true]` : "[unstableId:true]");
     const { status, score } = statusFromText(row.statusText);
-    const shortName = course.shortName || course.fullName || "";
+    const courseName = resolveCourseName(course, pageCourseName);
+    const courseCode = resolveCourseCode(course, pageCourseName);
     const model = globalThis.PrairieRunModel;
     const partial = {
       id,
       source: "gradescope",
       kind: "assignment",
       courseKey: `gradescope:${courseId}`,
-      courseName: shortName,
-      courseCode: courseCodeFromShortName(shortName),
+      courseName,
+      courseCode,
       title: row.title,
       dueAt: row.dueAt,
       allDay: false,
@@ -339,6 +360,7 @@
     }
     const courses = (account?.courses || []).slice(0, MAX_COURSES);
     const items = [];
+    const discoveredCourses = [];
     let coursesWithRows = 0;
     let coursesWithEmptyMessage = 0;
     for (const course of courses) {
@@ -364,9 +386,18 @@
       const rows = parsed?.rows || [];
       if (rows.length) coursesWithRows += 1;
       if (NO_ASSIGNMENTS_MESSAGE.test(String(courseRes.text || ""))) coursesWithEmptyMessage += 1;
+      const pageCourseName = parsed?.courseName || "";
+      discoveredCourses.push({
+        id: course.id,
+        courseKey: `gradescope:${course.id}`,
+        courseCode: resolveCourseCode(course, pageCourseName),
+        courseName: resolveCourseName(course, pageCourseName),
+        url: courseUrl,
+        source: "gradescope",
+      });
       for (const row of rows) {
         try {
-          items.push(rowToDeadlineItem(row, course, checkedAt));
+          items.push(rowToDeadlineItem(row, course, checkedAt, pageCourseName));
         } catch (error) {
           log("Gradescope row skipped", { courseId: course.id, title: row?.title, error: error?.message || String(error) });
         }
@@ -375,21 +406,23 @@
     if (courses.length > 0 && coursesWithRows === 0 && coursesWithEmptyMessage === 0) {
       return { status: "error", items: [], error: "Gradescope layout changed", checkedAt };
     }
-    return { status: "ok", items, checkedAt };
+    return { status: "ok", items, courses: discoveredCourses, checkedAt };
   }
 
   const adapter = {
     id: "gradescope",
     label: "Gradescope",
-    origins: [ORIGIN],
+    origins: [`${ORIGIN}/*`],
     signInUrl: SIGN_IN_URL,
     parsers: { account: parseAccount, course: parseCourse },
     isSignedOut,
     sync,
   };
 
-  // Test seam: datetime normalization without a DOM.
+  // Test seams: datetime normalization and course-code extraction without a DOM.
   adapter.parseGradescopeInstant = parseGradescopeInstant;
+  adapter.courseCodeFromLabel = courseCodeFromLabel;
+  adapter.resolveCourseCode = resolveCourseCode;
 
   try {
     globalThis.PrairieRunSources?.register(adapter);

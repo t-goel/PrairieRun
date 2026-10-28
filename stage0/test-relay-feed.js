@@ -12,13 +12,23 @@ function loadExtension(file) {
   require(path.join(EXT_PATH, file));
 }
 
-function makeItem(dueAt, id = "ass1") {
+function makeItem(dueAt, id = "ass1", extras = {}) {
   return {
     id,
     title: "HW 1",
     source: "prairielearn",
     dueAt,
     status: "incomplete",
+    ...extras,
+  };
+}
+
+function okPublishResponse(feedId = "feedabc123def") {
+  return {
+    status: 200,
+    ok: true,
+    json: async () => ({ ok: true, url: `https://blob.test/feeds/${feedId}.ics` }),
+    text: async () => "",
   };
 }
 
@@ -77,6 +87,23 @@ test("normalizeRelayUrl keeps only clean https origins and paths", () => {
   assert.equal(optionsFeed.normalizeRelayUrl("https://relay.test/app//"), "https://relay.test/app");
   assert.equal(optionsFeed.normalizeRelayUrl("http://relay.test"), "");
   assert.equal(optionsFeed.normalizeRelayUrl("not a url"), "");
+});
+
+test("courseFeedEntries sorts and drops empty course feed rows", () => {
+  assert.deepEqual(optionsFeed.courseFeedEntries(null), []);
+  assert.deepEqual(optionsFeed.courseFeedEntries([]), []);
+  assert.deepEqual(
+    optionsFeed.courseFeedEntries({
+      "MATH 241": "https://relay.test/math.ics",
+      "": "https://relay.test/empty.ics",
+      "CS 225": "https://relay.test/cs.ics",
+      blank: "  ",
+    }),
+    [
+      { code: "CS 225", url: "https://relay.test/cs.ics" },
+      { code: "MATH 241", url: "https://relay.test/math.ics" },
+    ],
+  );
 });
 
 test("publish without feed config reports disabled then missing config", async () => {
@@ -184,19 +211,99 @@ test("autoPublish requires the feed enabled and the relay permission", async () 
   assert.equal(env.store.get("prairierunRelayStatus").state, "needs_permission");
 
   globalThis.PrairieRunExt.permissionsContains = async () => true;
-  env.setResponses([{ status: 200, ok: true, json: async () => ({ ok: true, url: "https://blob.test/feeds/feedabc123def.ics" }), text: async () => "" }]);
+  // Combined feed + one per-course (uncategorized) publish.
+  env.setResponses([
+    okPublishResponse(),
+    okPublishResponse("feedabc123def-uncategorized"),
+  ]);
   const published = await relay.autoPublish([makeItem("2026-11-01T12:00:00")], env.store.get("prairierunSettings"));
   assert.equal(published.ok, true);
+  assert.equal(env.fetchCalls.length, 2);
+  assert.equal(published.perCourse?.ok, true);
 });
 
 test("outputs.run fans the relay auto-publish into every sync", async () => {
   const env = installEnv();
   globalThis.fetch = env.fetchMock;
   configureFeed(env);
-  env.setResponses([{ status: 200, ok: true, json: async () => ({ ok: true, url: "https://blob.test/feeds/feedabc123def.ics" }), text: async () => "" }]);
+  env.setResponses([
+    okPublishResponse(),
+    okPublishResponse("feedabc123def-uncategorized"),
+  ]);
   const results = await outputs.run([makeItem("2026-11-01T12:00:00")], [], env.store.get("prairierunSettings"));
   assert.equal(results.relay.ok, true);
+  assert.equal(env.fetchCalls.length, 2);
   assert.equal(env.store.get("prairierunRelayStatus").state, "ok");
+});
+
+test("slugCourse and courseFeedId build stable per-course feed ids", () => {
+  assert.equal(relay.slugCourse("CS 225"), "cs-225");
+  assert.equal(relay.slugCourse("  MATH--241!! "), "math-241");
+  assert.equal(relay.courseFeedId("feedabc123def", "cs-225"), "feedabc123def-cs-225");
+  assert.equal(relay.courseFeedId("feedabc123def", "a".repeat(40)).length <= 64, true);
+});
+
+test("publishPerCourse groups by course and stores prairierunCourseFeeds", async () => {
+  const env = installEnv();
+  globalThis.fetch = env.fetchMock;
+  configureFeed(env);
+  env.setResponses([
+    okPublishResponse("feedabc123def-cs-225"),
+    okPublishResponse("feedabc123def-math-241"),
+  ]);
+  const items = [
+    makeItem("2026-11-01T12:00:00", "a1", { courseCode: "CS 225" }),
+    makeItem("2026-11-02T12:00:00", "a2", { courseCode: "CS 225" }),
+    makeItem("2026-11-03T12:00:00", "a3", { courseCode: "MATH 241" }),
+  ];
+  const result = await relay.publishPerCourse(items, {
+    settings: env.store.get("prairierunSettings"),
+    secrets: { relayPublishKey: "sekrit" },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(env.fetchCalls.length, 2);
+  const feedIds = env.fetchCalls.map((call) => JSON.parse(call.init.body).feedId).sort();
+  assert.deepEqual(feedIds, ["feedabc123def-cs-225", "feedabc123def-math-241"]);
+  const stored = env.store.get("prairierunCourseFeeds");
+  assert.equal(stored["CS 225"], "https://blob.test/feeds/feedabc123def-cs-225.ics");
+  assert.equal(stored["MATH 241"], "https://blob.test/feeds/feedabc123def-math-241.ics");
+});
+
+test("autoPublish and publishFromUserGesture also publish per-course feeds", async () => {
+  const env = installEnv();
+  globalThis.fetch = env.fetchMock;
+  configureFeed(env);
+  const items = [
+    makeItem("2026-11-01T12:00:00", "a1", { courseCode: "CS 225" }),
+    makeItem("2026-11-02T12:00:00", "a2", { courseCode: "MATH 241" }),
+  ];
+  env.setResponses([
+    okPublishResponse(),
+    okPublishResponse("feedabc123def-cs-225"),
+    okPublishResponse("feedabc123def-math-241"),
+  ]);
+  const auto = await relay.autoPublish(items, env.store.get("prairierunSettings"));
+  assert.equal(auto.ok, true);
+  assert.equal(auto.perCourse?.ok, true);
+  assert.equal(env.fetchCalls.length, 3);
+
+  env.fetchCalls.length = 0;
+  env.store.delete("prairierunRelayStatus");
+  env.store.delete("prairierunCourseFeeds");
+  env.setResponses([
+    okPublishResponse(),
+    okPublishResponse("feedabc123def-cs-225"),
+    okPublishResponse("feedabc123def-math-241"),
+  ]);
+  const gestured = await relay.publishFromUserGesture(
+    items,
+    env.store.get("prairierunSettings"),
+    { relayPublishKey: "sekrit" },
+  );
+  assert.equal(gestured.ok, true);
+  assert.equal(gestured.perCourse?.ok, true);
+  assert.equal(env.fetchCalls.length, 3);
+  assert.equal(env.store.get("prairierunCourseFeeds")["CS 225"], "https://blob.test/feeds/feedabc123def-cs-225.ics");
 });
 
 test("formatPublishedAt formats timestamp into America/Chicago date-time without status prefixes", () => {

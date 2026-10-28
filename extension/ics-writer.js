@@ -328,10 +328,10 @@
         lines.push(`DTSTART:${formatUtc(instant)}`);
         lines.push(`DTEND:${formatUtc(instant)}`);
       } else {
-        // block1h: DTSTART = dueAt − 1h, DTEND = dueAt
+        // Default timed block: DTSTART = dueAt − 15m, DTEND = dueAt
         const endIso = item.dueAt || item.endAt || item.startAt;
         const endDate = new Date(endIso);
-        const startDate = new Date(endDate.getTime() - 60 * 60 * 1000);
+        const startDate = new Date(endDate.getTime() - 15 * 60 * 1000);
         lines.push(`DTSTART:${formatUtc(startDate)}`);
         lines.push(`DTEND:${formatUtc(endDate)}`);
       }

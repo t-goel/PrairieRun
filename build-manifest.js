@@ -27,7 +27,7 @@ const FIREFOX_MIN_VERSION = "115.0";
 // auth helpers, then the deadline model, registry, net/parse layer, source
 // adapters, stores, and outputs, then the calendar module, the sync
 // orchestrator stub, and finally the scanner that depends on all of them.
-const FIREFOX_BACKGROUND_SCRIPTS = ["compat.js", "oauth-config.js", "auth-utils.js", "deadline-model.js", "source-registry.js", "net.js", "parse-host.js", "prairielearn-adapter.js", "identity-resolver.js", "source-prairielearn.js", "source-canvas.js", "source-gradescope.js", "source-prairietest.js", "ics-parse.js", "ics-writer.js", "deadline-store.js", "outputs.js", "relay-push.js", "calendar.js", "sync-orchestrator.js", "background.js"];
+const FIREFOX_BACKGROUND_SCRIPTS = ["compat.js", "oauth-config.js", "auth-utils.js", "deadline-model.js", "source-registry.js", "net.js", "parse-host.js", "prairielearn-adapter.js", "identity-resolver.js", "source-prairielearn.js", "source-canvas.js", "source-gradescope.js", "source-prairietest.js", "source-courseweb.js", "ics-parse.js", "ics-writer.js", "deadline-store.js", "outputs.js", "relay-push.js", "calendar.js", "sync-orchestrator.js", "background.js"];
 
 function parseArgs(argv) {
   const args = { target: null, out: "dist-firefox", geckoId: DEFAULT_GECKO_ID, check: false };

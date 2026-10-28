@@ -83,20 +83,23 @@ PrairieLearn page
 Dashboard page ──> background.js
              ├─ scans course assessment tabs
              ├─ stores normalized assignment state
-             ├─ invokes calendar.js (via oauth-config.js + auth-utils.js)
-             ├─ owns Google Connect/Disconnect/status (PRAIRIERUN_AUTH_*)
-             ├─ schedules 24-hour Calendar reconciliation
+             ├─ publishes ICS via outputs.js → relay-push.js (Calendar feed)
+             ├─ Google Connect/Disconnect/status (PRAIRIERUN_AUTH_*) — UI hidden;
+             │  gated by DIRECT_GOOGLE_SYNC_ENABLED in background.js
              └─ notifies the home panel
 
-calendar.js ──> Google Calendar API
+calendar.js ──> Google Calendar API (optional; currently disabled in UI/background)
 ```
 
-The dashboard page and the home-panel footer are thin auth clients: they send
-`PRAIRIERUN_AUTH_STATUS` / `PRAIRIERUN_AUTH_CONNECT` /
-`PRAIRIERUN_AUTH_DISCONNECT` to the background worker, which delegates to
-`calendar.js`. Tokens live only in `storage.session` (via `PrairieRunExt`
-session helpers, never `storage.local`). On Calendar 401 the cached token is
-cleared once and the export retried with a fresh token.
+Direct Google OAuth sync is temporarily off: the dashboard `#auth-card` and
+home-panel Connect footer are hidden, and background Google export/repair is
+skipped while `DIRECT_GOOGLE_SYNC_ENABLED` is false. The Calendar feed is the
+active calendar path. When restored, the dashboard page and home-panel footer
+are thin auth clients: they send `PRAIRIERUN_AUTH_STATUS` /
+`PRAIRIERUN_AUTH_CONNECT` / `PRAIRIERUN_AUTH_DISCONNECT` to the background
+worker, which delegates to `calendar.js`. Tokens live only in `storage.session`
+(via `PrairieRunExt` session helpers, never `storage.local`). On Calendar 401
+the cached token is cleared once and the export retried with a fresh token.
 `auth-utils.js` classifies `redirect_uri_mismatch` / `invalid_client` /
 cancelled / expired distinctly (unit-tested in `stage0/test-auth-errors.js`).
 

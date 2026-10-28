@@ -23,8 +23,20 @@ Deploy once per household/organization:
 4. `vercel --prod`. Note the deployment URL, e.g. `https://prairierun-relay.vercel.app`.
 
 Then in PrairieRun's **Calendar feed** card on the dashboard page, click
-**Get my feed URL**. The extension claims a feed and shows the stable
-subscription URL to paste into any calendar app — no key to type.
+**Sign in with Google** (multi-device) or **Get anonymous feed URL**. The extension
+hydrates your feed credentials and shows the stable subscription URL to paste
+into any calendar app — no key to type.
+
+## Multi-device Identity (Convex Auth)
+
+To sync a feed URL across multiple devices without separate subscriptions,
+PrairieRun pairs this relay with a Convex Auth backend (`convex/`):
+- Convex stores the account → `feedId` association (`feeds` table).
+- The Convex deployment must have `PUBLISH_KEY` set to the identical value as
+  this relay's `PUBLISH_KEY`.
+- Convex derives `key = HMAC-SHA256(PUBLISH_KEY, feedId)` on demand for signed-in
+  devices, matching the key validation performed by `POST /api/publish`.
+- See `convex/README.md` for Convex environment setup.
 
 ## Claim endpoint (`GET /api/claim`)
 
@@ -48,7 +60,7 @@ Notes:
 - `POST /api/publish` with header `x-prairierun-key` and body `{ feedId, ics }`
   is the only write path. The header matches either the master `PUBLISH_KEY`
   or the per-feed key `HMAC-SHA256(PUBLISH_KEY, feedId)` for the body's
-  `feedId` (minted by `/api/claim`). It serves permissive CORS so the
+  `feedId` (minted by `/api/claim` or derived by Convex). It serves permissive CORS so the
   extension page can publish without a host permission (background
   auto-publishes additionally use an optional host permission for the relay).
 - Serving HEAD/GET of the blob is handled by Vercel Blob itself; this relay

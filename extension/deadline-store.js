@@ -15,7 +15,7 @@
     manual: 4,
   };
 
-  const LINKED_SOURCES = ["prairielearn", "gradescope", "canvas", "prairietest"];
+  const LINKED_SOURCES = ["prairielearn", "gradescope", "canvas", "prairietest", "courseweb"];
 
   // Course family heuristic: trailing section/instance suffixes that may be
   // ignored when deciding whether two course codes are the same course
@@ -23,6 +23,13 @@
   // extend this list for new naming schemes. Longest entries are matched
   // first when stripping, so e.g. "DK2" wins over "DK".
   const COURSE_FAMILY_SUFFIXES = ["DK2", "DK", "D2", "ONL", "ON", "X", "A", "B", "C", "AD1", "AL1"];
+
+  // Term designators (e.g. "Fall 2026", "FA2026", "SP26") must not be treated
+  // as subject + course code.
+  const TERM_SUBJECTS = new Set([
+    "FA", "FALL", "SP", "SPRING", "SU", "SUMMER", "WI", "WIN", "WINTER", "AU", "AUTUMN",
+  ]);
+  const EMBEDDED_COURSE_CODE_GLOBAL = /(?:^|[^A-Z0-9])([A-Z]{2,4})[\s_-]*(\d{3}[A-Z0-9]{0,3})(?![A-Z0-9])/gi;
 
   function precedenceOf(source) {
     const rank = PRECEDENCE[source];
@@ -44,15 +51,33 @@
 
   // Normalize a course code for grouping: uppercase, strip ALL whitespace and
   // non-alphanumeric punctuation, so "CS 498", "cs-498", and "CS498" produce
-  // the same key. Keeps a leading "SUBJ + 3 digits (+ up to 3 trailing
-  // letters/digits)" core so long display names such as "CS 425 AL1 Fall
-  // 2026 CRN12345" do not leak into the key; the family rule below re-links
-  // suffixed variants into one family.
+  // the same key. Drops leading term prefixes ("Fall 2026", "FA2026") so term
+  // prefixes do not leak into the key. Keeps a leading "SUBJ + 3 digits (+ up
+  // to 3 trailing letters/digits)" core so long display names such as "CS 425
+  // AL1 Fall 2026 CRN12345" do not leak into the key; the family rule below
+  // re-links suffixed variants into one family.
   function normalizeCourseCode(value) {
-    const text = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    let text = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
     if (!text) return "";
+    text = text.replace(/^(?:FA|FALL|SP|SPRING|SU|SUMMER|WI|WIN|WINTER|AU|AUTUMN)(?:20\d{2}|\d{2})/, "");
     const match = text.match(/^([A-Z]{2,4})(\d{3})([A-Z0-9]{0,3})/);
     return match ? `${match[1]}${match[2]}${match[3] || ""}` : text;
+  }
+
+  // Find a course code embedded anywhere in a label (e.g. Gradescope short
+  // names like "fa26_cs425" where the code is not at the start). Same shape
+  // as normalizeCourseCode's core: SUBJ + 3 digits + up to 3 trailing chars.
+  // Skips term designators such as "Fall 2026", "FA2026", "SP 2026", "FA26".
+  function embeddedCourseCode(value) {
+    const text = String(value || "").toUpperCase();
+    if (!text) return "";
+    for (const match of text.matchAll(EMBEDDED_COURSE_CODE_GLOBAL)) {
+      const subj = match[1];
+      const num = match[2];
+      if (TERM_SUBJECTS.has(subj) && /^20\d{2}$|^\d{2}$/.test(num)) continue;
+      return `${subj}${num}`;
+    }
+    return "";
   }
 
   function courseCodeOf(item) {
@@ -61,9 +86,12 @@
       const derived = model()?.courseCodeFromName?.(item?.courseName || "");
       if (derived) return normalizeCourseCode(derived);
     } catch {
-      // Ignore; fall through to empty.
+      // Ignore; fall through to the embedded-code search.
     }
-    return "";
+    // Already-stored Gradescope items may have a null courseCode when the
+    // adapter missed an underscore/term-prefixed short name; recover from
+    // courseName so Course links can still group them with Canvas/PL.
+    return embeddedCourseCode(item?.courseName || "");
   }
 
   // Normalize a title for cross-source comparison: lowercase, collapse
@@ -71,7 +99,7 @@
   // section suffix such as the Canvas "CS 425 AL1 Fall 2026 CRN12345" tag.
   function normTitle(value) {
     let text = String(value || "").toLowerCase();
-    text = text.replace(/\(.*?crn\s*\d+.*?\)\s*$/u, "");
+    text = text.replace(/\(.*?\bcrn\s*\d+.*?\)\s*$/u, "");
     text = text.replace(/[^\p{L}\p{N} ]+/gu, "");
     return text.replace(/\s+/g, " ").trim();
   }
@@ -85,79 +113,80 @@
   function sameCourseFamily(first, second) {
     if (!first || !second) return false;
     if (first === second) return true;
-    const [shorter, longer] = first.length <= second.length ? [first, second] : [second, first];
-    if (!longer.startsWith(shorter)) return false;
-    const extra = longer.slice(shorter.length);
-    if (COURSE_FAMILY_SUFFIXES.includes(extra)) return true;
-    if (/\d$/.test(shorter) && /^\d/.test(extra)) return false;
-    return extra.length >= 2 && /[A-Z]/.test(extra);
+    const [short, long] = first.length <= second.length ? [first, second] : [second, first];
+    if (!long.startsWith(short)) return false;
+    const tail = long.slice(short.length);
+    if (!tail) return true;
+    for (const suffix of COURSE_FAMILY_SUFFIXES) {
+      if (tail === suffix) return true;
+    }
+    // Heuristic: only accept tails of length >= 2 that contain at least one
+    // letter, so trailing digit extensions (e.g. "CS4" -> "CS498") never match.
+    if (tail.length >= 2 && /[A-Z]/.test(tail)) return true;
+    return false;
   }
 
-  // Transitive family clustering over normalized keys. Returns a Map of key
-  // -> representative, where the representative is the family's shortest key
-  // (lexicographic tiebreak), so "CS498", "CS498DK", and "CS498DK2" all map
-  // to one suggested bucket whose code is "CS498".
-  function familyMapOf(keys) {
-    const unique = [...new Set(keys.filter(Boolean))];
-    const parent = new Map(unique.map((key) => [key, key]));
-    const find = (key) => {
-      let root = key;
-      while (parent.get(root) !== root) root = parent.get(root);
-      while (parent.get(key) !== root) {
-        const next = parent.get(key);
-        parent.set(key, root);
-        key = next;
+  // Group an array of course codes into connected components under the
+  // family rule, mapping every member to the component's shortest code.
+  function familyMapOf(codes) {
+    const list = [...new Set((codes || []).filter(Boolean))];
+    const parent = new Map();
+    const find = (x) => {
+      let root = x;
+      while (parent.has(root)) root = parent.get(root);
+      let curr = x;
+      while (curr !== root) {
+        const next = parent.get(curr) || root;
+        parent.set(curr, root);
+        curr = next;
       }
       return root;
     };
-    for (let i = 0; i < unique.length; i += 1) {
-      for (let j = i + 1; j < unique.length; j += 1) {
-        if (!sameCourseFamily(unique[i], unique[j])) continue;
-        const a = find(unique[i]);
-        const b = find(unique[j]);
-        if (a === b) continue;
-        // Deterministic root; the final representative is recomputed from
-        // full cluster membership below.
-        const rep = a.length < b.length || (a.length === b.length && a.localeCompare(b) < 0) ? a : b;
-        parent.set(a, rep);
-        parent.set(b, rep);
+    const union = (a, b) => {
+      const ra = find(a);
+      const rb = find(b);
+      if (ra === rb) return;
+      // Canonical representative: shortest code, ties broken alphabetically.
+      const pick = ra.length < rb.length
+        ? ra
+        : rb.length < ra.length
+          ? rb
+          : ra.localeCompare(rb) <= 0 ? ra : rb;
+      const drop = pick === ra ? rb : ra;
+      parent.set(drop, pick);
+    };
+
+    for (let i = 0; i < list.length; i += 1) {
+      for (let j = i + 1; j < list.length; j += 1) {
+        if (sameCourseFamily(list[i], list[j])) union(list[i], list[j]);
       }
     }
-    const clusters = new Map();
-    for (const key of unique) {
-      const root = find(key);
-      if (!clusters.has(root)) clusters.set(root, []);
-      clusters.get(root).push(key);
-    }
+
     const map = new Map();
-    for (const members of clusters.values()) {
-      let rep = members[0];
-      for (const key of members) {
-        if (key.length < rep.length || (key.length === rep.length && key.localeCompare(rep) < 0)) rep = key;
-      }
-      for (const member of members) map.set(member, rep);
+    for (const code of list) {
+      map.set(code, find(code));
     }
     return map;
   }
 
-  // Title family rule for near-miss detection: two normalized titles relate
-  // when they are equal, or when one is a left-prefix of the other with a 2+
-  // character extra tail ("quiz 1" vs "quiz 1 extension"). An all-digit tail
-  // never relates ("quiz 1" vs "quiz 10" are different assignments).
-  function relatedTitles(first, second) {
-    if (!first || !second) return false;
-    if (first === second) return true;
-    const [shorter, longer] = first.length <= second.length ? [first, second] : [second, first];
-    if (!longer.startsWith(shorter)) return false;
-    const extra = longer.slice(shorter.length);
-    return extra.length >= 2 && !/^\d+$/.test(extra);
+  // Cross-source related title test: either exact match, or one normalized
+  // title is a whitespace-delimited prefix of the other (e.g. "HW 3" vs
+  // "HW 3: Distributed Hash Tables"). Minimum 3 characters to avoid false
+  // positives on tiny labels.
+  function relatedTitles(a, b) {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+    if (short.length < 3) return false;
+    if (!long.startsWith(short)) return false;
+    const nextChar = long.charAt(short.length);
+    return nextChar === " " || nextChar === "";
   }
 
-  // Group items by course code, then fold codes that belong to the same
-  // course family into one suggested bucket keyed by the family's shortest
-  // normalized code, so "CS 498 | CS 498DK | CS 498DK2" all appear under one
-  // row ("CS498"). Returns CourseLinks with confirmed:false (suggestions
-  // only; the user confirms in the options page).
+  // Suggest course links from a set of DeadlineItems (or enrolled course
+  // objects). Groups items by canonical course code, collects all distinct
+  // courseKey values seen per source, and collapses suffixed codes into the
+  // family's base code ("CS498DK" -> "CS498").
   function suggestCourseLinks(items) {
     const byCode = {};
     for (const item of items || []) {
@@ -175,12 +204,20 @@
         entry[source].sort();
       }
     }
-    const family = familyMapOf(Object.keys(byCode));
-    const links = {};
+    return foldSuggestions(byCode);
+  }
+
+  // Collapse suffixed suggestion keys into their family representative,
+  // unioning the courseKey arrays for each source.
+  function foldSuggestions(byCode) {
+    const codes = Object.keys(byCode);
+    if (!codes.length) return {};
+    const family = familyMapOf(codes);
+    const folded = {};
     for (const [code, entry] of Object.entries(byCode)) {
-      const bucketCode = family.get(code) || code;
-      if (!links[bucketCode]) links[bucketCode] = { confirmed: false };
-      const target = links[bucketCode];
+      const bucket = family.get(code) || code;
+      if (!folded[bucket]) folded[bucket] = { confirmed: false };
+      const target = folded[bucket];
       for (const source of LINKED_SOURCES) {
         const keys = entry[source];
         if (!Array.isArray(keys)) continue;
@@ -191,11 +228,68 @@
         target[source].sort();
       }
     }
-    return links;
+    return folded;
   }
 
-  // Index confirmed links: courseKey -> course code. Only confirmed:true
-  // links participate in merging; suggestions never merge by themselves.
+  function sourceKeyCount(entry) {
+    let count = 0;
+    for (const source of LINKED_SOURCES) {
+      if (Array.isArray(entry?.[source]) && entry[source].length) count += 1;
+    }
+    return count;
+  }
+
+  // Merge stored links with suggestions from the current item set. Rows that
+  // appear on two or more sources are auto-confirmed so cross-source dedupe
+  // runs without a manual Linked checkbox.
+  // extra may be an array of extra course objects or a results map from sync.
+  function reconcileCourseLinks(stored = {}, items = [], extra = {}) {
+    const extraItems = [];
+    if (Array.isArray(extra)) {
+      extraItems.push(...extra);
+    } else if (extra && typeof extra === "object") {
+      for (const [sourceId, res] of Object.entries(extra)) {
+        if (Array.isArray(res?.courses)) {
+          for (const c of res.courses) {
+            extraItems.push({
+              source: c.source || sourceId,
+              courseKey: c.courseKey || `${sourceId}:${c.id}`,
+              courseCode: c.courseCode || c.shortName || null,
+              courseName: c.courseName || c.fullName || c.name || "",
+            });
+          }
+        }
+      }
+    }
+    const suggested = suggestCourseLinks([...(items || []), ...extraItems]);
+    const codes = [...new Set([...Object.keys(stored || {}), ...Object.keys(suggested || {})])];
+    const family = familyMapOf(codes);
+    const merged = {};
+
+    function absorb(code, entry) {
+      if (!entry || typeof entry !== "object") return;
+      const bucket = family.get(code) || code;
+      if (!merged[bucket]) merged[bucket] = { confirmed: false };
+      const target = merged[bucket];
+      for (const source of LINKED_SOURCES) {
+        const keys = entry[source];
+        if (!Array.isArray(keys)) continue;
+        target[source] = [...new Set([...(target[source] || []), ...keys])].sort();
+      }
+      if (entry.confirmed === true) target.confirmed = true;
+    }
+
+    for (const [code, entry] of Object.entries(stored || {})) absorb(code, entry);
+    for (const [code, entry] of Object.entries(suggested || {})) absorb(code, entry);
+
+    for (const entry of Object.values(merged)) {
+      if (sourceKeyCount(entry) >= 2) entry.confirmed = true;
+    }
+    return merged;
+  }
+
+  // Index confirmed links: courseKey -> course code. Only confirmed rows
+  // participate in merging (including auto-confirmed multi-source rows).
   function confirmedLinkIndex(links) {
     const index = new Map();
     for (const [code, entry] of Object.entries(links || {})) {
@@ -387,7 +481,7 @@
   }
 
   // Per-source replacement merge with the PR 1 contract:
-  // mergeSourceResults(prev, results, links, settings?) -> { items, changes, nearMisses }.
+  // mergeSourceResults(prev, results, links, settings?) -> { items, changes, nearMisses, courseLinks }.
   // - status 'ok' replaces that source's items; signed_out/error/disabled or a
   //   source missing from results keeps the previous items unchanged, so a
   //   broken or signed-out source never wipes its items.
@@ -423,11 +517,20 @@
       }
     }
 
-    const { items, nearMisses } = dedupe([...nextById.values()], links);
+    const candidates = [...nextById.values()];
+    const { items, nearMisses } = dedupe(candidates, links);
     return { items, changes: diffChanges(prevById, items), nearMisses };
   }
 
-  const api = { mergeSourceResults, suggestCourseLinks, dedupe, normTitle, normalizeCourseCode, familyMapOf };
+  const api = {
+    mergeSourceResults,
+    suggestCourseLinks,
+    reconcileCourseLinks,
+    dedupe,
+    normTitle,
+    normalizeCourseCode,
+    familyMapOf,
+  };
   globalThis.PrairieRunDeadlineStore = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })();

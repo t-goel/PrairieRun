@@ -15,7 +15,7 @@
   const adapter = {
     id: "prairielearn",
     label: "PrairieLearn",
-    origins: ["https://us.prairielearn.com"],
+    origins: ["https://us.prairielearn.com/*"],
     signInUrl: "https://us.prairielearn.com/pl",
     parsers: {},
     isSignedOut(fetchResult) {

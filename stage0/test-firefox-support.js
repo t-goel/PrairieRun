@@ -94,6 +94,31 @@ test("Brave-like user agents do not select Firefox OAuth behavior", () => {
   assert.equal(ext.isFirefox, false);
 });
 
+test("permissions helpers normalize bare origins to match patterns", async () => {
+  const seen = { contains: null, request: null };
+  const ns = firefoxNamespace();
+  ns.permissions = {
+    contains: (details) => {
+      seen.contains = details;
+      return Promise.resolve(true);
+    },
+    request: (details) => {
+      seen.request = details;
+      return Promise.resolve(true);
+    },
+  };
+  const ext = runCompatWith(ns, { exposeAs: "chrome", userAgent: "Mozilla/5.0 Chrome/120.0" });
+  // Spread into host-realm arrays: vm sandbox arrays trip deepStrictEqual.
+  assert.deepEqual([...ext.toHostPermissionPatterns(["https://www.gradescope.com"])], ["https://www.gradescope.com/*"]);
+  assert.deepEqual([...ext.toHostPermissionPatterns(["https://us.prairietest.com/"])], ["https://us.prairietest.com/*"]);
+  assert.deepEqual([...ext.toHostPermissionPatterns(["https://www.gradescope.com/*"])], ["https://www.gradescope.com/*"]);
+  assert.deepEqual([...ext.toHostPermissionPatterns(["https://*.illinois.edu/*"])], ["https://*.illinois.edu/*"]);
+  assert.equal(await ext.permissionsContains(["https://www.gradescope.com"]), true);
+  assert.deepEqual({ ...seen.contains, origins: [...seen.contains.origins] }, { origins: ["https://www.gradescope.com/*"] });
+  assert.equal(await ext.permissionsRequest(["https://us.prairietest.com"]), true);
+  assert.deepEqual({ ...seen.request, origins: [...seen.request.origins] }, { origins: ["https://us.prairietest.com/*"] });
+});
+
 test("session tokens fall back to memory and never touch local storage", async () => {
   const ns = firefoxNamespace({ session: false });
   const ext = runCompatWith(ns, { exposeAs: "browser", userAgent: "Firefox/121.0" });
@@ -164,7 +189,7 @@ test("firefox manifest swaps in a scripts-array background and the gecko identit
     assert.ok(!("optional_host_permissions" in firefox), "Firefox has no optional_host_permissions");
     // scripts array (not service_worker: Firefox only enables that on 121+)
     // with the full PR-1 scaffold load order.
-    assert.deepEqual(background, { scripts: ["compat.js", "oauth-config.js", "auth-utils.js", "deadline-model.js", "source-registry.js", "net.js", "parse-host.js", "prairielearn-adapter.js", "identity-resolver.js", "source-prairielearn.js", "source-canvas.js", "source-gradescope.js", "source-prairietest.js", "ics-parse.js", "ics-writer.js", "deadline-store.js", "outputs.js", "relay-push.js", "calendar.js", "sync-orchestrator.js", "background.js"] });
+    assert.deepEqual(background, { scripts: ["compat.js", "oauth-config.js", "auth-utils.js", "deadline-model.js", "source-registry.js", "net.js", "parse-host.js", "prairielearn-adapter.js", "identity-resolver.js", "source-prairielearn.js", "source-canvas.js", "source-gradescope.js", "source-prairietest.js", "source-courseweb.js", "ics-parse.js", "ics-writer.js", "deadline-store.js", "outputs.js", "relay-push.js", "calendar.js", "sync-orchestrator.js", "background.js"] });
     assert.equal(browser_specific_settings.gecko.strict_min_version, "115.0");
     assert.match(browser_specific_settings.gecko.id, /@/);
     for (const file of ["compat.js", "oauth-config.js", "auth-utils.js", "deadline-model.js", "source-registry.js", "calendar.js", "background.js", "content.js", "home-panel.js", "options-dashboard.js", "options.html"]) {
@@ -187,6 +212,7 @@ test("dashboard suppresses unconfigured Firefox Google OAuth client notices from
   assert.equal(friendlySyncMessage(directSyncNotice), "");
 
   assert.equal(isSuppressedSyncMessage("Scanning…"), false);
-  assert.equal(isSuppressedSyncMessage("Synchronizing Google Calendar…"), false);
+  // Direct Google sync status strings stay suppressed while that path is hidden.
+  assert.equal(isSuppressedSyncMessage("Synchronizing Google Calendar…"), true);
   assert.equal(isSuppressedSyncMessage("Sync failed."), false);
 });

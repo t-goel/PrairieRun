@@ -271,3 +271,94 @@ test("spaced UTC offsets normalize to ISO before Date parsing", () => {
   assert.equal(adapter.parseGradescopeInstant("not a date"), null);
   assert.equal(adapter.parseGradescopeInstant(null), null);
 });
+
+test("courseCodeFromLabel finds codes after term/underscore prefixes and suffixes", () => {
+  assert.equal(adapter.courseCodeFromLabel("CS 425"), "CS 425");
+  assert.equal(adapter.courseCodeFromLabel("CS425"), "CS 425");
+  assert.equal(adapter.courseCodeFromLabel("fa26_cs425"), "CS 425");
+  assert.equal(adapter.courseCodeFromLabel("FA26-CS425"), "CS 425");
+  assert.equal(adapter.courseCodeFromLabel("CS425DK"), "CS 425DK");
+  assert.equal(adapter.courseCodeFromLabel("CS 425 AL1"), "CS 425");
+  assert.equal(adapter.courseCodeFromLabel("Distributed Systems"), null);
+});
+
+test("courseCodeFromLabel skips term designators like Fall 2026 and FA2026", () => {
+  assert.equal(adapter.courseCodeFromLabel("Fall 2026 CS 425"), "CS 425");
+  assert.equal(adapter.courseCodeFromLabel("Fall 2026 CS425"), "CS 425");
+  assert.equal(adapter.courseCodeFromLabel("FA2026_CS425"), "CS 425");
+  assert.equal(adapter.courseCodeFromLabel("fa2026_cs425"), "CS 425");
+  assert.equal(adapter.courseCodeFromLabel("FA 2026 CS 425"), "CS 425");
+  assert.equal(adapter.courseCodeFromLabel("SP 2026 CS 425"), "CS 425");
+  assert.equal(adapter.courseCodeFromLabel("SU 2026 CS 425"), "CS 425");
+  assert.equal(adapter.courseCodeFromLabel("WIN 2026 CS 425"), "CS 425");
+  assert.equal(adapter.courseCodeFromLabel("CS425 (Fall 2026)"), "CS 425");
+  assert.equal(adapter.courseCodeFromLabel("Fall 2026"), null);
+});
+
+test("account parser supports div.courseBox--shortname and Your Courses heading", () => {
+  const html = `<div id="account-show"><h2 class="pageHeading">Your Courses</h2>`
+    + `<div class="courseList"><div class="courseList--term">Fall 2026</div>`
+    + `<div class="courseList--coursesForTerm">`
+    + `<a class="courseBox" href="/courses/101">`
+    + `<div class="courseBox--shortname">Fall 2026 CS 425</div>`
+    + `<div class="courseBox--name">Distributed Systems</div>`
+    + `</a></div></div></div>`;
+  const parsed = adapter.parsers.account(docOf(html), ACCOUNT_URL);
+  assert.equal(parsed.signedOut, false);
+  assert.equal(parsed.courses.length, 1);
+  assert.equal(parsed.courses[0].shortName, "Fall 2026 CS 425");
+});
+
+test("resolveCourseCode falls back to fullName and page title", () => {
+  assert.equal(
+    adapter.resolveCourseCode({ shortName: "Distributed Systems", fullName: "CS 425 Distributed Systems" }),
+    "CS 425"
+  );
+  assert.equal(
+    adapter.resolveCourseCode({ shortName: "Distributed Systems", fullName: "" }, "CS 425"),
+    "CS 425"
+  );
+  assert.equal(
+    adapter.resolveCourseCode({ shortName: "fa26_cs425", fullName: "Distributed Systems" }),
+    "CS 425"
+  );
+  assert.equal(
+    adapter.resolveCourseCode({ shortName: "Distributed Systems", fullName: "Fall 2026 CS 425" }),
+    "CS 425"
+  );
+});
+
+test("sync stores CS425 courseCode for underscore short names", async () => {
+  const account = `<div id="account-show"><h2 class="pageHeading">Student Courses</h2>`
+    + `<div class="courseList"><div class="courseList--term">Fall 2026</div>`
+    + `<div class="courseList--coursesForTerm">`
+    + courseBox({ id: "101", shortName: "fa26_cs425", fullName: "Distributed Systems" })
+    + `</div></div></div>`;
+  const { ctx } = stubContext({ "/account": account, "/courses/101": COURSE_HTML });
+  const result = await adapter.sync(ctx);
+  assert.equal(result.status, "ok");
+  assert.ok(result.items.length > 0);
+  for (const item of result.items) {
+    assert.equal(item.courseCode, "CS 425");
+    assert.equal(item.courseKey, "gradescope:101");
+  }
+});
+
+test("sync returns discovered courses even when course has zero assignments", async () => {
+  const account = `<div id="account-show"><h2 class="pageHeading">Student Courses</h2>`
+    + `<div class="courseList"><div class="courseList--term">Fall 2026</div>`
+    + `<div class="courseList--coursesForTerm">`
+    + courseBox({ id: "101", shortName: "Fall 2026 CS 425", fullName: "Distributed Systems" })
+    + `</div></div></div>`;
+  const emptyCourse = `<h1>CS 425</h1><table><tbody><tr role="row"><th scope="col">Assignment</th></tr></tbody></table><p>There are no assignments in this course yet.</p>`;
+  const { ctx } = stubContext({ "/account": account, "/courses/101": emptyCourse });
+  const result = await adapter.sync(ctx);
+  assert.equal(result.status, "ok");
+  assert.equal(result.items.length, 0);
+  assert.ok(Array.isArray(result.courses));
+  assert.equal(result.courses.length, 1);
+  assert.equal(result.courses[0].id, "101");
+  assert.equal(result.courses[0].courseKey, "gradescope:101");
+  assert.equal(result.courses[0].courseCode, "CS 425");
+  assert.equal(result.courses[0].url, `${ORIGIN}/courses/101`);
+});

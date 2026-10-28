@@ -97,17 +97,32 @@
     if (!fetchResult || !fetchResult.redirected) return false;
     const finalOrigin = originOf(fetchResult.url);
     if (!finalOrigin) return false;
-    const allowed = new Set(adapterOrigins(adapter).map(originOf).filter(Boolean));
-    return !allowed.has(finalOrigin);
+    const allowed = adapterOrigins(adapter);
+    return !allowed.some((pattern) => {
+      const value = String(pattern || "");
+      if (value.includes("*")) {
+        try {
+          const url = new URL(fetchResult.url);
+          const hostPattern = new URL(value.replace("*.", "wildcard."));
+          const suffix = hostPattern.hostname.replace(/^wildcard/, "");
+          return url.protocol === hostPattern.protocol && url.hostname.endsWith(suffix);
+        } catch { return false; }
+      }
+      return originOf(value) === finalOrigin;
+    });
   }
 
   async function hasOriginPermission(adapter) {
     try {
       const check = globalThis.PrairieRunExt?.permissionsContains;
+      // No permissions helper (unit tests): treat as granted.
       if (typeof check !== "function") return true;
       return Boolean(await check(adapterOrigins(adapter)));
     } catch {
-      return true;
+      // Fail closed: a thrown contains() used to be treated as granted, which
+      // let sync run without host access and surface as a CORS failure
+      // (especially on Brave, where optional-host prompts are often blocked).
+      return false;
     }
   }
 
@@ -235,7 +250,11 @@
         }
       }
 
-      const { items, changes } = globalThis.PrairieRunDeadlineStore.mergeSourceResults(prev, results, courseLinks);
+      const { items, changes, courseLinks: resolvedLinks } = globalThis.PrairieRunDeadlineStore.mergeSourceResults(
+        prev,
+        results,
+        courseLinks
+      );
       const status = {};
       for (const [sourceId, result] of Object.entries(results)) {
         const adapter = adapters.find((entry) => entry.id === sourceId);
@@ -249,10 +268,21 @@
         };
       }
       try {
-        await globalThis.PrairieRunExt?.storageLocalSet?.({
+        const allCourses = [];
+        for (const res of Object.values(results)) {
+          if (Array.isArray(res?.courses)) allCourses.push(...res.courses);
+        }
+        const payload = {
           prairierunDeadlines: items,
           prairierunSourceStatus: status,
-        });
+        };
+        if (resolvedLinks && typeof resolvedLinks === "object") {
+          payload.prairierunCourseLinks = resolvedLinks;
+        }
+        if (allCourses.length) {
+          payload.prairierunCourses = allCourses;
+        }
+        await globalThis.PrairieRunExt?.storageLocalSet?.(payload);
       } catch { /* storage failures must not break the contract in tests */ }
 
       await globalThis.PrairieRunOutputs.run(items, changes, settings);

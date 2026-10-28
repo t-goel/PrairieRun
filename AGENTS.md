@@ -33,15 +33,17 @@ Dashboard page (options.html) -> background.js
 
 calendar.js -> Google Calendar API (optional direct sync)
 relay/      -> Vercel relay that hosts the auto-updating iCal feed
+convex/     -> Convex backend for multi-device feed identity (Convex Auth Google)
 ```
 
 `extension/options.html` is the full dashboard page (no popup). The toolbar
 button opens it via `action.onClicked` (`PrairieRunExt
 .addActionClickedListener`); `options-dashboard.js` drives settings, auth,
 source rows, and Sync now; section scripts render Canvas setup, course links,
-and the Calendar feed card (one-click activation via the bundled relay's
-`/api/claim`, custom relays in a collapsed details; manual `.ics` export
-buttons were removed — the auto-updating feed supersedes them).
+and the Calendar feed card (multi-device activation via Convex Auth Google,
+one-click anonymous activation via `/api/claim`, custom relays in a collapsed
+details; manual `.ics` export buttons were removed — the auto-updating feed
+supersedes them).
 
 `extension/background.js` imports `extension/oauth-config.js`,
 `extension/auth-utils.js`, then `extension/calendar.js`; `calendar.js` is a
@@ -98,26 +100,35 @@ per-project change). `auth-utils.js` is the pure error-classification helper
 - Sources are default-off except PrairieLearn. The dashboard Sources card owns
   the per-source enable toggles, host-permission grants, and sign-in actions
   (toggle click is the permission gesture, then an immediate sync runs);
-  disabled sources must show "off", never "pending".
+  disabled sources must show "off", never "pending". Host permission checks
+  always use match patterns (`https://host/*`); a failed/thrown
+  `permissions.contains` must fail closed (never enable into a CORS fetch).
+  Brave often suppresses `permissions.request` — keep the toggle off, guide
+  Site access (`brave://extensions` → Details), and re-sync on
+  `permissions.onAdded`.
 - Assignments without due dates are hidden by default, but users can reveal
   them and add/edit a due date.
 - If a due date is added to a previously undated assignment, it becomes eligible
   for sync.
 - Calendar events should be one-hour blocks ending at the assignment due date.
-- The hosted iCal feed (Calendar feed card + the `relay/` Vercel scaffold) is
-  the first-class, no-setup calendar integration: "Get my feed URL" claims a
-  per-install feed ID + HMAC-derived key from the bundled default relay's
-  `/api/claim` (`relay/api/claim.js`; the master `PUBLISH_KEY` env secret
-  never ships to clients, and a minted key only works for its own feedId).
-  The extension publishes the full ICS after every successful sync via
-  `outputs.js` -> `relay-push.js`
-  (`prairierunSettings.relay`, `prairierunSecrets.relayPublishKey`,
-  `prairierunRelayStatus`), and the feed URL is the subscription target for
-  any calendar app. Never send users through Google Cloud Console as part of
-  normal setup.
-- Direct Google Calendar sync (OAuth) stays optional; when its client is not
-  configured, the dashboard points users at the Calendar feed card instead of
-  setup instructions.
+- The hosted iCal feed (Calendar feed card + `relay/` Vercel scaffold +
+  `convex/` multi-device auth) is the first-class, no-setup calendar
+  integration: "Sign in with Google" associates an account with a feedId in
+  Convex and syncs it across devices, while "Get anonymous feed URL" preserves
+  one-click activation via `/api/claim`. First sign-in migrates any existing
+  local feed via `linkLegacyFeed` (HMAC verification). The master `PUBLISH_KEY`
+  is shared between Convex and the relay; keys are derived on the fly and never
+  stored in the database. The extension publishes the full ICS after every
+  successful sync via `outputs.js` -> `relay-push.js` (`prairierunSettings.relay`,
+  `prairierunSecrets.relayPublishKey`, `prairierunRelayStatus`), and the feed
+  URL is the subscription target for any calendar app. Never send users
+  through Google Cloud Console as part of normal setup.
+- Direct Google Calendar sync (OAuth) is temporarily hidden in the UI
+  (`#auth-card` on the dashboard, home-panel Connect footer) and skipped in
+  the background (`DIRECT_GOOGLE_SYNC_ENABLED = false` in `background.js`).
+  The Calendar feed card is the only calendar path. Flip the flag and unhide
+  the card/footer when re-enabling OAuth. Setup docs in
+  `extension/google-calendar-setup.md` remain for that later restore.
 - Only sync new assignments or materially changed assignments.
 - Every successful page scan also checks marked Calendar events for missing
   copies or duplicates. Those are repair work even when assignment data is
@@ -131,10 +142,11 @@ per-project change). `auth-utils.js` is the pure error-classification helper
   class/calendar color.
 - Preserve duplicate prevention via stable PrairieRun identifiers in calendar
   event metadata/descriptions.
-- Google sign-in is per-user `launchWebAuthFlow` (implicit flow): the dashboard
-  page and the home-panel footer offer Connect/Disconnect, status shows
-  `Not connected` / `Connected, expires <time>`, and Disconnect revokes at
-  `oauth2.googleapis.com/revoke` and clears the session token.
+- Google sign-in (when re-enabled) is per-user `launchWebAuthFlow` (implicit
+  flow): the dashboard page and the home-panel footer offer Connect/Disconnect,
+  status shows `Not connected` / `Connected, expires <time>`, and Disconnect
+  revokes at `oauth2.googleapis.com/revoke` and clears the session token.
+  While `DIRECT_GOOGLE_SYNC_ENABLED` is false those surfaces stay hidden.
 - Tokens live only in `storage.session`/memory (via `PrairieRunExt`
   get/set/remove session helpers); re-prompt only on expiry, revocation, or
   Disconnect. On Calendar 401, clear the cached token once and retry with a
@@ -244,101 +256,3 @@ PR 1 lays down the DeadlineItem model and module stubs so later PRs can work
 in parallel without touching shared files. No user-visible behavior change.
 
 - `extension/deadline-model.js` (`PrairieRunModel`): `SOURCE_IDS`, `STATUSES`,
-  `KINDS`, `makeDeadlineItem`, `localToUtc`, `formatCentral`,
-  `fromLegacyPlAssignment`, `toLegacyPlAssignment`, `fingerprint`.
-- `extension/source-registry.js` (`PrairieRunSources`): `register`, `get`,
-  `list`, `enabled`.
-- `extension/net.js` (`PrairieRunNet`): `fetchPage`, `assertSafeUrl`,
-  `SafetyError`. PR 1 covers `us.prairielearn.com`; PR 2 extends it.
-- `extension/parse-host.js` (`PrairieRunParseHost.parseHtml`): stub, PR 2 owns.
-- `extension/sync-orchestrator.js` (`PrairieRunOrchestrator.runSync`): stub
-  with the final contract, PR 2 owns. Not wired to any trigger yet.
-- `extension/source-prairielearn.js`: real wrapper mapping stored legacy PL
-  assignments via `fromLegacyPlAssignment`. PR 3 owns fetch.
-- `extension/source-canvas.js`, `source-gradescope.js`,
-  `extension/source-prairietest.js`: disabled stubs. Owners PR 4/5/6.
-- `extension/ics-parse.js` (`PrairieRunIcs`), `extension/ics-writer.js`
-  (`PrairieRunIcsWriter`), `extension/deadline-store.js`
-  (`PrairieRunDeadlineStore`), `extension/outputs.js` (`PrairieRunOutputs`),
-  `extension/relay-push.js`: stubs. Owners PR 4/7/8/9/11.
-- `extension/offscreen.html` / `extension/offscreen.js`: PR 2 owns.
-- `extension/options.html` + `options.js/css` + `options-canvas/courses/export/
-  output/relay.js`: "Coming soon" stubs. Later PRs own each section.
-- Extra early-owned surfaces (with the owner's approval): `relay-push.js`
-  (PR 11 content) and `outputs.js` (PR 9 content) are live now — the hosted
-  iCal feed publishes after every sync — plus `options-dashboard.js`
-  (replaces the removed popup) and `options-feed.js` (Calendar feed card).
-- Removed with the owner's approval: the toolbar popup and its files, the
-  "Output"/"Relay" Coming-soon stub sections (`options-output.js` was a PR 1
-  stub, later PR 8's manual `options-export.js` was removed in favor of the
-  feed), and the dashboard header status chip (status lives in the Sources
-  card line).
-- `relay/`: minimal Vercel relay scaffold (`api/claim.js` mints per-install
-  feed IDs + HMAC keys; `api/publish.js` Blob-stores the ICS). Deployed once
-  by the owner; see `relay/README.md`. Live at
-  `https://prairierun-feed.vercel.app` (Vercel project `prairierun-feed`;
-  its Blob store must have public access). Deploy with `vercel --prod`
-  from `relay/`.
-- Background load order (`importScripts` + `FIREFOX_BACKGROUND_SCRIPTS`):
-  `compat.js`, `oauth-config.js`, `auth-utils.js`, `deadline-model.js`,
-  `source-registry.js`, `net.js`, `parse-host.js`, `prairielearn-adapter.js`,
-  `identity-resolver.js`, `source-prairielearn.js`, `source-canvas.js`,
-  `source-gradescope.js`, `source-prairietest.js`, `ics-parse.js`,
-  `ics-writer.js`, `deadline-store.js`, `outputs.js`, `relay-push.js`,
-  `calendar.js`, `sync-orchestrator.js`, `background.js` (Firefox only).
-  Do not edit these shared load lists in Wave-2 PRs; note changes in the PR
-  description instead.
-- Storage: `prairierunAssignments` stays authoritative for calendar/panel
-  until PR 9. `prairierunDeadlines` mirrors it after each scan.
-  `prairierunSourceStatus`, `prairierunSecrets`, `prairierunCourseLinks`,
-  `prairierunIcsSequences`, `prairierunSettings` (with
-  `sources:{prairielearn:{enabled:true},...}`, `syncIntervalMinutes:60`).
-- Timezone: store UTC, display America/Chicago.
-- Parallel-work docs: do not edit `AGENTS.md`/`systemdesign.md`/`ux.md` in
-  Wave-2 PRs. Write notes to `docs/notes/PR-<n>.md`; PR 10 folds them in.
-  Exceptions: PR 0, PR 1, PR 10 may edit the docs.
-
-The runtime adapter and `stage0/prairielearn-adapter.js` are duplicated parser
-implementations. Consolidating them is a future improvement, not a casual
-cleanup.
-
-## Documentation Discipline
-
-- After every meaningful code or behavior change, update this `AGENTS.md` file
-  if the change affects architecture, workflow, testing, project rules, or
-  future-agent context.
-- Also update `systemdesign.md` for architecture/dependency changes.
-- Also update `ux.md` for user-facing behavior changes.
-- Historical stage planning documents were removed at the user's request.
-  Keep current setup documentation, systemdesign.md, ux.md, and test assets.
-
-## Commit Discipline
-
-- Commit after every logical change.
-- Keep commits focused and descriptive.
-- Do not push unless the user explicitly asks.
-- Do not revert user changes unless the user explicitly requests it.
-
-## Verification
-
-For extension changes, run checks proportional to the risk. Common baseline:
-
-```bash
-for file in extension/*.js stage0/*.js capture-helper/*.js; do node --check "$file" || exit 1; done
-node build-manifest.js --target=chrome --check
-node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json', 'utf8')); console.log('manifest ok')"
-node stage0/test-adapter-core.js
-node stage0/test-capture-bundle.js
-node --test stage0/test-firefox-support.js
-node --test stage0/test-assignment-dedup.js stage0/test-calendar-dedup.js stage0/test-calendar-repair.js
-node --test stage0/test-identity-resolver.js
-```
-
-The capture-bundle check requires the private, gitignored capture JSON file;
-without that fixture, report the unavailable check rather than inventing data.
-
-When UI or sync behavior changes, also ask the user to reload the unpacked
-extension and verify in Chrome/Brave because this environment cannot fully
-exercise PrairieLearn login state or Google OAuth. Firefox changes need the
-same manual pass via `about:debugging` temporary load plus the Firefox OAuth
-client in `extension/google-calendar-setup.md`.

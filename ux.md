@@ -50,12 +50,14 @@ service worker, and has now been removed.
 - Calendar links, class-specific calendars, completion state, duplicate
   prevention, and the strict-greater-than-95% (not equal to 95%) completion rule
   must not regress.
-- Google Connect/Disconnect stays understandable: dashboard card plus a one-line
-  home-panel footer, `Not connected` / `Connected, expires <time>` status,
-  distinct cancellation vs. misconfiguration messages, and a collapsed
+- Direct Google Connect/Disconnect is temporarily hidden (dashboard auth card
+  and home-panel footer). Calendar feed is the only calendar path. When
+  re-enabled, keep Connect/Disconnect understandable: dashboard card plus a
+  one-line home-panel footer, `Not connected` / `Connected, expires <time>`
+  status, distinct cancellation vs. misconfiguration messages, and a collapsed
   copy-redirect-URI troubleshooter. No client-ID settings field in the UI.
-  With no sign-in, background syncs show "Connect Google Calendar to sync."
-  instead of opening a window; only Connect uses interactive auth.
+  Background runs must never open a Google window; only Connect uses
+  interactive auth.
 - If an assignment was already completed before a late extension was added,
   the extension deadline is not shown or scheduled as new work.
 
@@ -69,11 +71,15 @@ agent-facing project rules.
   no header status bar — live status lives in the Sources card's status line.
 - Sources card: one row per registered source with an enable switch. Disabled
   sources read "off"; enabling a source first asks for its host permission
-  (the toggle click is the gesture) and then triggers an immediate background
-  sync so status becomes real right away. Rows offer Sign in (signed-out
-  state), Grant access (missing-permission state), and show per-source last
-  checked times in Central time. Saving the Canvas feed URL in the Canvas
-  card triggers the same immediate re-sync.
+  (the toggle click is the gesture; origins are requested as match patterns
+  like `https://www.gradescope.com/*`) and then triggers an immediate
+  background sync so status becomes real right away. If the browser
+  suppresses the prompt (common on Brave), the row keeps the toggle off,
+  opens the source site when useful, and shows Site access guidance instead
+  of enabling into a CORS failure. Rows offer Sign in (signed-out state),
+  Grant access (missing-permission state), and show per-source last checked
+  times in Central time. Saving the Canvas feed URL in the Canvas card
+  triggers the same immediate re-sync.
 - Calendar feed card (first-class calendar path): "Get my feed URL" activates
   everything in one click against the bundled default relay (per-install feed
   ID + HMAC key minted at `/api/claim`); the page shows the stable
@@ -82,9 +88,10 @@ agent-facing project rules.
   relay" details. No Google Cloud Console work is ever part of ordinary
   setup, and there are no manual .ics download buttons (the feed replaces
   them).
-- Google Calendar card (optional path): Connect/Disconnect remains available;
-  when the OAuth client is not configured on the device, the card says so and
-  points at the Calendar feed card instead of setup instructions.
+- Google Calendar card (optional path): temporarily hidden. When restored,
+  Connect/Disconnect should remain available; when the OAuth client is not
+  configured on the device, the card should say so and point at the Calendar
+  feed card instead of setup instructions.
 - Section chrome is headline-only; no subtitle or hint paragraphs under
   headings.
 
