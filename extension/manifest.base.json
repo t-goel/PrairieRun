@@ -4,8 +4,7 @@
   "version": "0.1.0",
   "description": "Scan PrairieLearn assignments and stage them for Google Calendar.",
   "action": {
-    "default_title": "PrairieRun",
-    "default_popup": "popup.html"
+    "default_title": "Open PrairieRun"
   },
   "background": {
     "service_worker": "background.js"
@@ -14,8 +13,19 @@
     "storage",
     "tabs",
     "identity",
-    "alarms"
+    "alarms",
+    "offscreen"
   ],
+  "optional_host_permissions": [
+    "https://canvas.illinois.edu/*",
+    "https://www.gradescope.com/*",
+    "https://us.prairietest.com/*",
+    "https://*.illinois.edu/*"
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
   "host_permissions": [
     "https://us.prairielearn.com/*",
     "https://www.googleapis.com/*"

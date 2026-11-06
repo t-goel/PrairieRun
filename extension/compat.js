@@ -13,7 +13,7 @@
 //     pulls both in via the guarded importScripts call below.
 //   - Any scripts-array background page: the manifest lists them in order and
 //     the guard below (typeof importScripts === "function") skips reloading.
-//   - Content scripts / popup: manifest / popup.html list compat.js first.
+//   - Content scripts / HTML pages: manifest or page script-tag order lists compat.js first.
 (function () {
   if (globalThis.PrairieRunExt) return;
 
@@ -101,24 +101,183 @@
     }
   }
 
+  async function removeSessionValue(key) {
+    memorySession.delete(key);
+    if (hasSessionStorage()) {
+      try {
+        const area = storageArea("session");
+        if (typeof area.remove === "function") {
+          await callAsync(area, "remove", key);
+        }
+      } catch (_error) {
+        // The in-memory copy is already cleared.
+      }
+    }
+  }
+
+  // Offscreen document management (Chrome only; Firefox parses in the
+  // background page). Only one offscreen document can exist, so concurrent
+  // callers share a module-level promise.
+  let offscreenReady = null;
+
+  function offscreenEnsure() {
+    // Firefox has no chrome.offscreen API; parsing runs in place there.
+    if (isFirefox) return Promise.resolve(false);
+    if (offscreenReady) return offscreenReady;
+    const attempt = (async () => {
+      const runtime = ext?.runtime;
+      if (runtime && typeof runtime.getContexts === "function") {
+        try {
+          const contexts = await callAsync(runtime, "getContexts", { contextTypes: ["OFFSCREEN_DOCUMENT"] });
+          if (Array.isArray(contexts) && contexts.length) return true;
+        } catch (_error) {
+          // Older Chrome without getContexts: fall through to create.
+        }
+      }
+      const offscreen = ext?.offscreen;
+      if (!offscreen || typeof offscreen.createDocument !== "function") {
+        throw new Error("Extension offscreen API is unavailable.");
+      }
+      try {
+        await callAsync(offscreen, "createDocument", {
+          url: "offscreen.html",
+          reasons: ["DOM_PARSER"],
+          justification: "Parse fetched course pages locally",
+        });
+      } catch (error) {
+        // A concurrent creator may have won the race; that still satisfies us.
+        if (/only one offscreen|already exists/i.test(error?.message || "")) return true;
+        throw error;
+      }
+      return true;
+    })();
+    offscreenReady = attempt;
+    attempt.then(
+      () => undefined,
+      () => {
+        if (offscreenReady === attempt) offscreenReady = null;
+      }
+    );
+    return offscreenReady;
+  }
+
+  // Brave can expose navigator.brave even when UA looks like Chrome.
+  const isBrave = Boolean(
+    (typeof navigator !== "undefined" && navigator.brave)
+    || (typeof navigator !== "undefined" && /Brave/i.test(navigator.userAgent || "")),
+  );
+
+  // chrome.permissions requires match patterns (`https://host/*`), not bare
+  // origins. Adapters historically stored bare origins; normalize at the
+  // permission boundary so contains/request match optional_host_permissions.
+  function toHostPermissionPatterns(origins) {
+    const list = Array.isArray(origins) ? origins : [];
+    const out = [];
+    for (const entry of list) {
+      const raw = String(entry || "").trim();
+      if (!raw) continue;
+      // Already a match pattern with a wildcard (e.g. https://*.illinois.edu/*).
+      if (raw.includes("*")) {
+        out.push(raw);
+        continue;
+      }
+      try {
+        const url = new URL(raw.includes("://") ? raw : `https://${raw}`);
+        if (url.protocol !== "http:" && url.protocol !== "https:") {
+          out.push(raw);
+          continue;
+        }
+        // Bare origin or any concrete path → grant the whole origin. Paths on
+        // origin patterns are ignored by permissions.request anyway.
+        out.push(`${url.origin}/*`);
+      } catch {
+        out.push(raw.endsWith("/*") ? raw : `${raw.replace(/\/+$/, "")}/*`);
+      }
+    }
+    return out;
+  }
+
+  function permissionsContains(origins) {
+    const perms = ext?.permissions;
+    // No permissions API (tests): assume granted so background logic still runs.
+    if (!perms || typeof perms.contains !== "function") return Promise.resolve(true);
+    const patterns = toHostPermissionPatterns(origins);
+    if (!patterns.length) return Promise.resolve(true);
+    return callAsync(perms, "contains", { origins: patterns }).then(Boolean);
+  }
+
+  function permissionsRequest(origins) {
+    const perms = ext?.permissions;
+    if (!perms || typeof perms.request !== "function") {
+      return Promise.reject(new Error("Extension permissions API is unavailable."));
+    }
+    const patterns = toHostPermissionPatterns(origins);
+    if (!patterns.length) return Promise.resolve(true);
+    return callAsync(perms, "request", { origins: patterns }).then(Boolean);
+  }
+
+  // Chrome 133+ toolbar chip for withheld/optional hosts. No-op when missing
+  // (Brave and older Chromium). Used after opening the target site in a tab.
+  function permissionsAddHostAccessRequest(details) {
+    const perms = ext?.permissions;
+    if (!perms || typeof perms.addHostAccessRequest !== "function") {
+      return Promise.resolve(false);
+    }
+    const payload = { ...(details || {}) };
+    if (payload.pattern) {
+      const patterns = toHostPermissionPatterns([payload.pattern]);
+      if (patterns[0]) payload.pattern = patterns[0];
+    }
+    return callAsync(perms, "addHostAccessRequest", payload).then(() => true, () => false);
+  }
+
+  function addPermissionsAddedListener(listener) {
+    const area = ext?.permissions?.onAdded;
+    if (!area || typeof area.addListener !== "function") return;
+    area.addListener(listener);
+  }
+
   const PrairieRunExt = {
     isFirefox,
+    isBrave,
     storageLocalGet: (keys) => storageGet("local", keys),
     storageLocalSet: (items) => storageSet("local", items),
     storageLocalClear: () => storageClear("local"),
     getSessionValue,
     setSessionValue,
     clearSessionValues,
+    removeSessionValue,
     tabsCreate: (options) => callAsync(ext.tabs, "create", options),
     tabsRemove: (tabId) => callAsync(ext.tabs, "remove", tabId),
     tabsQuery: (query) => callAsync(ext.tabs, "query", query),
     tabsGet: (tabId) => callAsync(ext.tabs, "get", tabId),
     tabsSendMessage: (tabId, message) => callAsync(ext.tabs, "sendMessage", tabId, message),
+    // Optional host permissions (e.g. Canvas) are requested from a user click.
+    // Rejects when the permissions API is unavailable, so callers can treat
+    // that as "not granted". Always normalizes to match patterns (`https://host/*`).
+    permissionsRequest,
+    permissionsContains,
+    permissionsAddHostAccessRequest,
+    addPermissionsAddedListener,
+    toHostPermissionPatterns,
     runtimeSendMessage: (message) => callAsync(ext.runtime, "sendMessage", message),
     identityGetRedirectURL: (path) => ext.identity.getRedirectURL(path),
     identityLaunchWebAuthFlow: (details) => callAsync(ext.identity, "launchWebAuthFlow", details),
     addRuntimeMessageListener: (listener) => ext.runtime.onMessage.addListener(listener),
+    // Toolbar button click (only fires when no default_popup is declared).
+    addActionClickedListener: (listener) => {
+      const area = ext.action?.onClicked;
+      if (!area || typeof area.addListener !== "function") {
+        return Promise.reject(new Error("Extension action API is unavailable."));
+      }
+      area.addListener(listener);
+      return Promise.resolve();
+    },
     addStorageChangedListener: (listener) => ext.storage.onChanged.addListener(listener),
+    addStartupListener: (listener) => ext?.runtime?.onStartup?.addListener(listener),
+    addInstalledListener: (listener) => ext?.runtime?.onInstalled?.addListener(listener),
+    offscreenEnsure,
+    tabsCreateForeground: (url) => callAsync(ext.tabs, "create", { url, active: true }),
     alarmsCreate: (name, info) => ext.alarms ? callAsync(ext.alarms, "create", name, info) : Promise.reject(new Error("Extension alarms API is unavailable.")),
     addAlarmsListener: (listener) => ext.alarms?.onAlarm?.addListener(listener),
     addTabsUpdatedListener: (listener) => ext.tabs.onUpdated.addListener(listener),

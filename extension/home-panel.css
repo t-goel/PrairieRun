@@ -7,6 +7,8 @@
 #prairierun-home-panel .prr-row-main { display: flex; align-items: flex-start; }
 #prairierun-home-panel .prr-meta { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem; font-size: .78rem; margin-top: .1rem; }
 #prairierun-home-panel .prr-course-tag { color: #6c757d; font-size: .72rem; }
+#prairierun-home-panel .prr-badge { display: inline-block; min-width: 1.6em; padding: 0 .35em; border-radius: .35rem; background: #e9ecef; color: #495057; font-size: .68rem; font-weight: 700; text-align: center; }
+#prairierun-home-panel .prr-location { color: #6c757d; font-size: .72rem; }
 #prairierun-home-panel .prr-progress { position: relative; display: inline-flex; width: 36px; height: 36px; align-items: center; justify-content: center; color: #263238; font-size: .78rem; font-weight: 600; }
 #prairierun-home-panel .prr-progress svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
 #prairierun-home-panel .prr-progress circle { fill: none; stroke-width: 5; }
@@ -28,6 +30,9 @@
 #prairierun-home-panel .prr-collapsed summary { cursor: pointer; }
 #prairierun-home-panel a { text-decoration: none; }
 #prairierun-home-panel a:hover { text-decoration: underline; }
+#prairierun-home-panel .prr-auth { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .5rem 1rem; border-top: 1px solid rgba(0,0,0,.125); font-size: .78rem; }
+#prairierun-home-panel .prr-auth-actions { display: flex; gap: .4rem; }
+#prairierun-home-panel .prr-auth-error { padding: 0 1rem .5rem; font-size: .78rem; }
 .prr-date-dialog { border: 0; border-radius: .5rem; padding: 1.25rem; box-shadow: 0 .5rem 1.5rem rgba(0,0,0,.25); }
 .prr-date-dialog::backdrop { background: rgba(0,0,0,.35); }
 .prr-date-dialog form { display: grid; gap: .75rem; min-width: 280px; }

@@ -53,7 +53,7 @@ legacy events with different marker IDs without comparing assignment titles.
 A stored repair-version marker forces full reconciliation of dated assignments
 on the first scan after this upgrade, including past-due work. The marker and
 daily sync timestamp advance only when every exported assignment succeeds.
-Partial failures appear in the popup and leave repair due on the next scan.
+Partial failures appear in the dashboard page and leave repair due on the next scan.
 Repair version 2 forces another reconciliation for installations that already
 completed the first repair. Verified source URLs and aliases persist across
 scans of the same canonical ID; newly found identities trigger repair even for
@@ -80,22 +80,91 @@ PrairieLearn page
       ├─ home-panel.js             (embedded display/edit surface)
       └─ view-utils.js             (shared filtering/sorting/status helpers)
 
-Popup ──> background.js
+Dashboard page ──> background.js
              ├─ scans course assessment tabs
              ├─ stores normalized assignment state
-             ├─ invokes calendar.js
-             ├─ schedules 24-hour Calendar reconciliation
+             ├─ publishes ICS via outputs.js → relay-push.js (Calendar feed)
+             ├─ Google Connect/Disconnect/status (PRAIRIERUN_AUTH_*) — UI hidden;
+             │  gated by DIRECT_GOOGLE_SYNC_ENABLED in background.js
              └─ notifies the home panel
 
-calendar.js ──> Google Calendar API
+calendar.js ──> Google Calendar API (optional; currently disabled in UI/background)
 ```
 
+Direct Google OAuth sync is temporarily off: the dashboard `#auth-card` and
+home-panel Connect footer are hidden, and background Google export/repair is
+skipped while `DIRECT_GOOGLE_SYNC_ENABLED` is false. The Calendar feed is the
+active calendar path. When restored, the dashboard page and home-panel footer
+are thin auth clients: they send `PRAIRIERUN_AUTH_STATUS` /
+`PRAIRIERUN_AUTH_CONNECT` / `PRAIRIERUN_AUTH_DISCONNECT` to the background
+worker, which delegates to `calendar.js`. Tokens live only in `storage.session`
+(via `PrairieRunExt` session helpers, never `storage.local`). On Calendar 401
+the cached token is cleared once and the export retried with a fresh token.
+`auth-utils.js` classifies `redirect_uri_mismatch` / `invalid_client` /
+cancelled / expired distinctly (unit-tested in `stage0/test-auth-errors.js`).
+
+Background runs never open a Google window. `getCalendarToken()` defaults to
+`{ interactive: false }`: without a cached token it tries silent auth once
+and throws `AuthRequiredError` (exported on `PrairieRunCalendar`) on failure.
+Only the Connect button passes `interactive:true` (via
+`PrairieRunCalendar.connect()`). Background Calendar callers
+(`notifyHomeTab`, `resyncStoredAssignments`, `PRAIRIERUN_ASSIGNMENT_UPDATED`)
+catch `AuthRequiredError` and set sync status `{ state: "auth_required",
+source: "google", current: "Connect Google Calendar to sync." }` instead of a
+per-assignment failure. The dashboard page renders that state with a Connect button.
+
+## Hosted iCal feed (first-class calendar path)
+
+`extension/options.html` configures a feed under `prairierunSettings.relay`
+(`{ enabled, relayUrl, feedId }`) with the publish secret in
+`prairierunSecrets.relayPublishKey`; push state lives in
+`prairierunRelayStatus` (`{ state, url, publishedAt, hash }`). After every
+successful source sync, `sync-orchestrator.js` calls
+`PrairieRunOutputs.run`, which delegates to
+`PrairieRunRelay.autoPublish`: when the feed is enabled, the relay origin has
+been granted as an optional host permission, and the ICS content actually
+changed (hash ignores `DTSTAMP`/`LAST-MODIFIED` lines so unchanged content is
+not re-uploaded), `relay-push.js` POSTs the full ICS built by
+`PrairieRunIcsWriter` (sharing `prairierunIcsSequences` with manual exports
+for stable UIDs) to `<relayUrl>/api/publish` and stores the returned stable
+Blob URL. The bundled `relay/` directory is the Vercel scaffold for that
+relay: `api/claim.js` mints a per-install `feedId` plus an HMAC-SHA256 key
+derived from the env-only `PUBLISH_KEY` (so clients never see the master
+secret and a minted key only opens its own feed), and `api/publish.js`
+accepts the master key or that per-feed key; key-gated, permissive CORS so
+the options page can publish directly without a host permission (background
+auto-publish uses the granted origin). The dashboard's one-click "Get my feed
+URL" uses the claim endpoint against `PrairieRunRelay.DEFAULT_RELAY_URL`
+unless a custom relay is configured. Users subscribe to the URL in any
+calendar app, which keeps due dates current with no Google OAuth involvement.
+
+## Multi-source scaffold (PR 1, no behavior change)
+
+PR 1 adds the `DeadlineItem` normalized model (`extension/deadline-model.js`,
+global `PrairieRunModel`) and the source registry
+(`extension/source-registry.js`, global `PrairieRunSources`) plus stubs for
+every later module, so Wave-2 agents can work in parallel on owned files only.
+`background.js` still scans PrairieLearn tabs and `saveScanResult` still owns
+`prairierunAssignments`; it additionally mirrors `prairierunDeadlines` via
+`fromLegacyPlAssignment`. `calendar.js` and `home-panel.js` still read the
+legacy key until PR 9. `sync-orchestrator.js` (`PrairieRunOrchestrator.runSync`)
+is present but not wired to any trigger. New edge surfaces are
+`offscreen.html`/`offscreen.js` (PR 2 parsing host) and `options.html` with
+per-section stub scripts. Manifest `options_ui` points at `options.html`;
+Chrome keeps the `offscreen` permission and `optional_host_permissions` for
+Canvas/Gradescope/PrairieTest while Firefox drops `offscreen` and merges the
+optional hosts into `host_permissions`. Per-PR notes live in `docs/notes/`.
+
 The manifest loads the content scripts on PrairieLearn and loads
-`background.js` as the service worker. `background.js` imports `calendar.js`, so
+`background.js` as the service worker. `background.js` imports the full
+background module list in `FIREFOX_BACKGROUND_SCRIPTS` order (shim and auth
+config first, `calendar.js` ahead of the `sync-orchestrator.js` stub), so
 the calendar module is a live dependency even though it is not listed in the
 manifest's content-script array.
 
-The popup is status/settings-only. PrairieLearn scanning begins from the home
+The dashboard page (`extension/options.html`, opened by the toolbar button via
+`action.onClicked`; there is no popup) is status/settings-only. PrairieLearn
+scanning begins from the home
 page automatically, and a named extension alarm runs a full Calendar
 reconciliation at least once per 24-hour interval. The daily reconciliation
 includes stored assignments with due dates even when their normalized data is
@@ -115,7 +184,7 @@ shared source of truth and `build-manifest.js` (repo root) generates each
 target: `--target=chrome` regenerates `extension/manifest.json` (single-file
 `service_worker` background), and `--target=firefox` emits a `dist-firefox/`
 directory whose manifest swaps in a `scripts`-array background (`compat.js`,
-`calendar.js`, `background.js` in order) and adds
+`oauth-config.js`, `auth-utils.js`, `calendar.js`, `background.js` in order) and adds
 `browser_specific_settings.gecko` (stable add-on ID plus
 `strict_min_version: "115.0"`). The scripts array is required because
 Firefox only enables `service_worker` on 121+; the `typeof importScripts ===

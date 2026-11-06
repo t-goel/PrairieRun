@@ -12,6 +12,7 @@ test('upgrade repairs unchanged past-due assignments, retries failures, then sto
   const input = [{ id: 'pl:1:assessment:2', dueAtLocal: '2020-01-01 11:00:00', syncState: 'synced' }];
   const context = {
     console: { log: () => {} }, input,
+    PRAIRIERUN_DIRECT_GOOGLE_SYNC: true,
     PrairieRunCalendar: { inspectAssignmentEvents: async () => ({ missingIds: [], duplicateIds: [] }), exportAssignments: async (items) => {
       calls.push(items.map((item) => item.id));
       return items.map((assignment) => ({ assignment,
@@ -72,6 +73,7 @@ test('instance-only scans recover parent identity from history or a confirmed sa
   };
   const local = {};
   const context = { URL, console: { log: () => {} }, input: [instance], history: [original], links: {},
+    PRAIRIERUN_DIRECT_GOOGLE_SYNC: true,
     PrairieRunCalendar: {}, PrairieRunExt: {
       storageLocalSet: async (value) => Object.assign(local, value),
       storageLocalGet: async () => structuredClone(local),
@@ -116,6 +118,7 @@ test('a clean scan learns, saves and reuses server-verified parent links without
   let lookups = 0;
   let verificationMessages = 0;
   const context = { URL, console: { log: () => {} }, input: [item],
+    PRAIRIERUN_DIRECT_GOOGLE_SYNC: true,
     PrairieRunCalendar: {
       findParentCandidates: async () => { lookups++; return [{ courseInstanceId: '229304', assessmentId: '2724826', instanceId: '15272849' }]; },
       exportAssignments: async (items) => items.map((assignment) => ({ assignment, status: 'updated', removedDuplicates: 1 })),
@@ -157,6 +160,7 @@ test('refresh restores externally deleted events immediately, then skips unchang
   let inspectionFails = false;
   let exports = 0;
   const context = { console: { log: () => {} }, input,
+    PRAIRIERUN_DIRECT_GOOGLE_SYNC: true,
     PrairieRunCalendar: {
       inspectAssignmentEvents: async () => {
         if (inspectionFails) throw new Error('Network unavailable');
