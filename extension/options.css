@@ -467,6 +467,13 @@ button.source-action { width: 100%; padding: 6px 10px; font-size: 11px; margin-t
 .prr-course-link__check { color: var(--ok); font-weight: 900; }
 .prr-course-link--nolink { color: #666; cursor: default; }
 .prr-course-link--nolink .prr-course-link__check { color: #666; }
+
+/* Course links: the table has six columns ending in "Website"; keep the
+   trailing column readable when the table must shrink to the card width. */
+#course-links table { width: max-content; min-width: 0; max-width: 100%; }
+#course-links table th,
+#course-links table td { min-width: 0; overflow-wrap: anywhere; }
+#course-links table th:last-child { min-width: 72px; }
 .card ul,
 .card ol {
   margin: 8px 0 0;
