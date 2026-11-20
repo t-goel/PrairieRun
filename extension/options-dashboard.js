@@ -71,7 +71,7 @@ function refreshState() {
       const msg = friendlySyncMessage(raw || "Synchronizing…");
       showStatus(msg);
     } else if (response.sync?.state === "auth_required") {
-      showStatus(friendlySyncMessage(raw || "Sign in with Google to sync.") || "Sign in with Google to sync.");
+      showStatus(raw ? friendlySyncMessage(raw) : "");
     } else if (response.sync?.state === "error") {
       showStatus(raw || "Sync failed.", true);
     } else {

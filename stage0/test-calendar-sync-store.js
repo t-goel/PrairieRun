@@ -234,5 +234,5 @@ test("syncGoogleCalendarFromStore sets auth_required status when export throws A
   const result = await vm.runInContext("PrairieRunBackground.syncGoogleCalendarFromStore('test')", h.context);
   assert.equal(result.skipped, "auth_required");
   assert.equal(h.store.prairierunSyncStatus.state, "auth_required");
-  assert.equal(h.store.prairierunSyncStatus.current, "Connect Google Calendar to sync.");
+  assert.equal(h.store.prairierunSyncStatus.current, "");
 });

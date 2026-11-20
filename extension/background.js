@@ -193,7 +193,7 @@ function isAuthRequiredError(error) {
 }
 
 function authRequiredStatus() {
-  return { state: "auth_required", source: "google", current: "Connect Google Calendar to sync." };
+  return { state: "auth_required", source: "google", current: "" };
 }
 
 async function loadGoogleCalendarExportItems() {
