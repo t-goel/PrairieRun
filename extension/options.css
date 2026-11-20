@@ -208,36 +208,49 @@ button.secondary {
 .auth-buttons button,
 .auth-buttons a.secondary {
   width: auto;
+  height: 30px;
+  box-sizing: border-box;
   font-size: 11px;
-  padding: 6px 10px;
+  line-height: 1;
+  padding: 0 10px;
   margin: 0;
-}
-.auth-buttons a.secondary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  text-decoration: none;
-  font-weight: 700;
-  color: var(--ink);
-  background: var(--paper);
+  vertical-align: middle;
   border: 2px solid var(--ink);
   box-shadow: 2px 2px 0 var(--ink);
   transition: transform .05s ease, box-shadow .05s ease;
 }
+.auth-buttons button.primary {
+  background: var(--accent);
+  color: #fff;
+}
+.auth-buttons button.secondary,
+.auth-buttons a.secondary {
+  background: var(--paper);
+  color: var(--ink);
+  text-decoration: none;
+}
+.auth-buttons button.secondary:hover:not(:disabled),
 .auth-buttons a.secondary:hover {
   background: var(--wash);
   transform: translate(1px, 1px);
   box-shadow: 1px 1px 0 var(--ink);
 }
+.auth-buttons button.primary:hover:not(:disabled) {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--ink);
+}
+.auth-buttons button:active:not(:disabled),
 .auth-buttons a.secondary:active {
   transform: translate(2px, 2px);
   box-shadow: 0 0 0 var(--ink);
 }
 .auth-buttons a.secondary.icon-button {
-  width: 29px;
-  height: 29px;
+  width: 30px;
   padding: 0;
-  box-sizing: border-box;
+  flex-shrink: 0;
 }
 .auth-buttons a.secondary.icon-button svg {
   display: block;

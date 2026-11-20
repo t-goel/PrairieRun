@@ -20,6 +20,7 @@ const sourcesListElement = typeof document !== "undefined" ? document.querySelec
 const syncNowButton = typeof document !== "undefined" ? document.querySelector("#sync-now") : null;
 const syncStatusElement = typeof document !== "undefined" ? document.querySelector("#sync-status") : null;
 let authRedirectUri = "";
+let isGoogleConnected = false;
 let settings = { notificationLeadMinutes: 240, completionThreshold: 95 };
 let cachedSources = [];
 let cachedSourceStatus = {};
@@ -124,18 +125,22 @@ function formatShortTime(date) {
   return `${date.toLocaleDateString([], { month: "short", day: "numeric" })} at ${time}`;
 }
 
-async function refreshCalendarSyncStatus(authConnected = true) {
+async function refreshCalendarSyncStatus(authConnected = isGoogleConnected) {
   if (!calendarSyncInfo) return;
   calendarSyncInfo.hidden = false;
   if (!authConnected) {
     if (authSyncButton) authSyncButton.hidden = true;
     if (authOpenCalendarLink) authOpenCalendarLink.hidden = true;
+    if (authConnectButton) authConnectButton.hidden = false;
+    if (authDisconnectButton) authDisconnectButton.hidden = true;
     if (calendarSyncStatus) calendarSyncStatus.textContent = "No events synced to Google Calendar.";
     if (calendarSyncDetails) calendarSyncDetails.textContent = "";
     return;
   }
   if (authSyncButton) authSyncButton.hidden = false;
   if (authOpenCalendarLink) authOpenCalendarLink.hidden = false;
+  if (authConnectButton) authConnectButton.hidden = true;
+  if (authDisconnectButton) authDisconnectButton.hidden = false;
 
   try {
     const stored = await globalThis.PrairieRunExt.storageLocalGet([
@@ -147,12 +152,19 @@ async function refreshCalendarSyncStatus(authConnected = true) {
       "prairierunCourseLinks",
       "prairierunDeadlines",
     ]);
-    const syncMap = stored.prairierunCalendarSync && typeof stored.prairierunCalendarSync === "object"
-      ? stored.prairierunCalendarSync
-      : {};
-    const count = Object.keys(syncMap).length;
-    const lastDaily = stored.prairierunLastDailyCalendarSync;
     const syncStatus = stored.prairierunSyncStatus;
+
+    if (syncStatus?.state === "auth_required" && syncStatus?.source === "google") {
+      isGoogleConnected = false;
+      if (authConnectButton) authConnectButton.hidden = false;
+      if (authDisconnectButton) authDisconnectButton.hidden = true;
+      if (authSyncButton) authSyncButton.hidden = true;
+      if (authOpenCalendarLink) authOpenCalendarLink.hidden = true;
+      applyCalendarLayoutUi(false);
+      if (calendarSyncStatus) calendarSyncStatus.textContent = "No events synced to Google Calendar.";
+      if (calendarSyncDetails) calendarSyncDetails.textContent = "";
+      return;
+    }
 
     if (syncStatus?.state === "syncing" && syncStatus?.source === "google") {
       if (calendarSyncStatus) calendarSyncStatus.textContent = "Syncing events to Google Calendar…";
@@ -165,6 +177,12 @@ async function refreshCalendarSyncStatus(authConnected = true) {
       if (calendarSyncDetails) calendarSyncDetails.textContent = "Check sign-in and click Sync Calendar to retry.";
       return;
     }
+
+    const syncMap = stored.prairierunCalendarSync && typeof stored.prairierunCalendarSync === "object"
+      ? stored.prairierunCalendarSync
+      : {};
+    const count = Object.keys(syncMap).length;
+    const lastDaily = stored.prairierunLastDailyCalendarSync;
 
     if (count > 0) {
       let timeStr = "";
@@ -211,6 +229,7 @@ function renderAuthStatus(status = {}) {
   authRedirectUri = status.redirectUri || "";
   if (authRedirectElement) authRedirectElement.textContent = authRedirectUri;
   if (!status.clientConfigured) {
+    isGoogleConnected = false;
     authStatusElement.textContent = "No Google Calendar integration";
     authStatusElement.hidden = false;
     if (authConnectButton) authConnectButton.hidden = true;
@@ -222,7 +241,8 @@ function renderAuthStatus(status = {}) {
   }
   authStatusElement.textContent = "";
   authStatusElement.hidden = true;
-  if (status.connected) {
+  isGoogleConnected = Boolean(status.connected);
+  if (isGoogleConnected) {
     if (authConnectButton) authConnectButton.hidden = true;
     if (authDisconnectButton) authDisconnectButton.hidden = false;
     applyCalendarLayoutUi(true);
@@ -511,12 +531,9 @@ if (layoutRow) {
 
 if (typeof PrairieRunExt !== "undefined" && typeof PrairieRunExt.addStorageChangedListener === "function") {
   PrairieRunExt.addStorageChangedListener((changes, areaName) => {
-    if (areaName === "local" && changes.prairierunSyncStatus) {
+    if (areaName === "local" && (changes.prairierunSyncStatus || changes.prairierunCalendarSync || changes.prairierunLastDailyCalendarSync || changes.prairierunCalendarMappings)) {
       refreshState();
-      refreshCalendarSyncStatus(true);
-    }
-    if (areaName === "local" && (changes.prairierunCalendarSync || changes.prairierunLastDailyCalendarSync || changes.prairierunCalendarMappings)) {
-      refreshCalendarSyncStatus(true);
+      refreshAuthStatus();
     }
     if (areaName === "local" && changes.prairierunSourceStatus) {
       refreshState();
@@ -536,7 +553,7 @@ if (authSyncButton) {
       if (calendarSyncStatus) calendarSyncStatus.textContent = `Sync failed: ${err.message}`;
     } finally {
       authSyncButton.disabled = false;
-      await refreshCalendarSyncStatus(true);
+      await refreshAuthStatus();
     }
   });
 }

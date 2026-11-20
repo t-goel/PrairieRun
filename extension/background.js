@@ -249,6 +249,21 @@ async function syncGoogleCalendarFromStore(reason = "store") {
     return { skipped: "empty" };
   }
 
+  try {
+    const auth = await globalThis.PrairieRunCalendar?.getAuthStatus?.();
+    if (!auth?.connected) {
+      if (typeof globalThis.PrairieRunCalendar?.getCalendarToken === "function") {
+        await globalThis.PrairieRunCalendar.getCalendarToken();
+      }
+    }
+  } catch (authError) {
+    if (isAuthRequiredError(authError)) {
+      debugLog("Calendar sync needs sign-in", { error: authError.message });
+      await setSyncStatus(authRequiredStatus());
+      return { skipped: "auth_required" };
+    }
+  }
+
   debugLog("Synchronizing Google Calendar from store", { reason, count: items.length });
   await setSyncStatus({
     state: "syncing",
@@ -447,7 +462,6 @@ async function notifyHomeTab(tabId, assignments, detectedIds) {
   const eventRepairIds = new Set();
   const missingIds = new Set();
   if (!dailySyncDue && assignments.some((item) => item.dueAtLocal && item.syncState !== "stale")) {
-    await setSyncStatus({ state: "syncing", current: "Checking Google Calendar events…", found: assignments.length });
     try {
       const inspection = await PrairieRunCalendar.inspectAssignmentEvents(assignments);
       for (const id of inspection.missingIds) { eventRepairIds.add(id); missingIds.add(id); }
