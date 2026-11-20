@@ -192,6 +192,7 @@
       durationMinutes: typeof a.durationMinutes === "number" && Number.isFinite(a.durationMinutes) && a.durationMinutes > 0
         ? Math.min(240, Math.round(a.durationMinutes))
         : 15,
+      location: a.location != null ? String(a.location) : null,
       pl: {
         assessmentId,
         instanceId,
@@ -288,6 +289,7 @@
         : 15,
       startAt: item.startAt ?? existing.startAt ?? null,
       endAt: item.endAt ?? existing.endAt ?? null,
+      location: item.location ?? existing.location ?? null,
       rawDueText: item.rawDueText ?? existing.rawDueText ?? null,
       dueText: item.rawDueText ?? existing.dueText ?? null,
     };
@@ -302,6 +304,7 @@
       endAt: item.endAt ?? null,
       status: item.status ?? null,
       location: item.location ?? null,
+      durationMinutes: item.durationMinutes ?? null,
       url: item.url ?? null,
     };
     const sorted = {};

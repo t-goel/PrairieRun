@@ -32,6 +32,21 @@ test("access details preserve the exact local timestamp and timezone", () => {
   assert.equal(conflicting.dueAtLocal, "2026-09-14 23:59:00");
 });
 
+test("exam window, duration and location parse out of PrairieLearn details", () => {
+  const window = adapter.parseExamWindow('Start: 13:30, End: 14:00 (Online)');
+  assert.equal(window.startLocal, "13:30");
+  assert.equal(window.endLocal, "14:00");
+  const window2 = adapter.parseExamWindow("Exam is from 13:30 to 14:00 (Online)");
+  assert.equal(window2.startLocal, "13:30");
+  assert.equal(window2.endLocal, "14:00");
+  assert.equal(adapter.parseExamDurationMinutes("Exam duration: 3 hours"), 180);
+  assert.equal(adapter.parseExamDurationMinutes("90 minutes", null), 90);
+  assert.equal(adapter.parseExamDurationMinutes("Due on time", null), null);
+  assert.equal(adapter.parseLocationFromDetails('<td>Start: 13:30 CDT</td><td>Online</td>'), "Online");
+  const due = adapter.parseDueInfo("Due: 11:59 PM CDT", '<td>13:30 CDT</td><td>Online</td>');
+  assert.equal(due.location, "Online");
+});
+
 test("base labels and instance titles normalize to one assignment key", () => {
   assert.equal(adapter.baseLabel("Lec:01#1"), "Lec:01");
   assert.equal(adapter.normalizeInstanceTitle("The Relational Model instance #1"), "The Relational Model");

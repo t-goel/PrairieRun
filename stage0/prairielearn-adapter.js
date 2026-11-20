@@ -79,7 +79,52 @@ function parseDueInfo(visibleText, accessDetailsHtml) {
     dueText: untilMatch ? untilMatch[1].replace(/[.\s]+$/, "") : null,
     rawVisible,
     rawDetails: rawDetails || null,
+    location: parseLocationFromDetails(rawDetails),
   };
+}
+
+// Parse a PrairieLearn exam card (the Access-details HTML) for time window.
+// PrairieLearn shows, per row: "Time" (and place/end), e.g. "Start: 13:30, End: 14:00 (Location)".
+function parseExamWindow(detailsHtml) {
+  const text = decodeAttributeHtml(detailsHtml || "");
+  const trimmed = normalizeText(text);
+  const startMatch = trimmed.match(/(?:^|\b)Start(?:\s*&nbsp;|:\s*|[—-\s])?(\d{1,2}:\d{2})/i)
+    || trimmed.match(/(?:^|\b)At\s*(\d{1,2}:\d{2})/i)
+    || trimmed.match(/(?:^|\b)From\s*(\d{1,2}:\d{2})/i)
+    || trimmed.match(/(?:^|\b)(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})/)
+    || trimmed.match(/(?:^|\b)(\d{1,2}:\d{2})\s*(?:am|pm)/i);
+  if (startMatch) {
+    const endMatch = trimmed.match(/(?:^|\b)End(?:\s*&nbsp;|:\s*|[—-\s])?(\d{1,2}:\d{2})/i)
+      || trimmed.match(/[—–]\s*(\d{1,2}:\d{2})/)
+      || trimmed.match(/(?:^|\b)To\s+(\d{1,2}:\d{2})/i)
+      || trimmed.match(/(\d{1,2}:\d{2})\s*(?:am|pm)\b[^\d]*$/)
+      || trimmed.match(/(?:^|\b)(\d{1,2}:\d{2})\s*(?:am|pm)\s*$/);
+    return { startLocal: startMatch[1], endLocal: endMatch?.[1] || null, location: trimmed };
+  }
+  return { startLocal: null, endLocal: null, location: trimmed };
+}
+
+function parseExamDurationMinutes(rawVisible, examWindow) {
+  const text = normalizeText(rawVisible || "");
+  const m = text.match(/(\d+(?:\.\d+)?)\s*(hours?|hrs?|h)\b/i)
+    || text.match(/(\d+(?:\.\d+)?)\s*(minutes?|mins?|m)\b/i)
+    || text.match(/(\d+(?:\.\d+)?)\s*(days?|d)\b/i);
+  if (!m) return null;
+  const value = Number(m[1]);
+  const unit = m[2].slice(0, 1).toLowerCase();
+  const minutes = unit === "h" ? Math.round(value * 60) : unit === "m" ? Math.round(value) : unit === "d" ? Math.round(value * 1440) : Math.round(value);
+  return minutes > 0 && minutes <= 240 ? minutes : null;
+}
+
+function parseLocationFromDetails(detailsHtml) {
+  const text = decodeAttributeHtml(detailsHtml || "");
+  const parts = [...text.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((match) => normalizeText(match[1].replace(/<[^>]+>/g, "")));
+  const locCell = [...parts].reverse().find((cell) => cell
+    && /[A-Za-z]/.test(cell)
+    && !/^\d{1,2}:\d{2}/i.test(cell)
+    && !/^\d{4}-\d{2}-\d{2}/i.test(cell)
+    && !/^(start|end|time)\b/i.test(cell));
+  return locCell || null;
 }
 
 function stableAssignmentKey({ courseInstanceId: courseId, assessmentId, fallbackId }) {
@@ -142,6 +187,9 @@ function parseAssessmentRow(row, location, course) {
   const score = parsePercentage(row.querySelector('[data-testid="scorebar"]')?.textContent);
   const accessButton = row.querySelector('[aria-label="Access details"]');
   const due = parseDueInfo(cells[2]?.textContent || row.textContent, accessButton?.getAttribute("data-bs-content"));
+  const examWindow = parseExamWindow(accessButton?.getAttribute("data-bs-content"));
+  const durationMinutes = parseExamDurationMinutes(due.rawVisible, examWindow);
+  const examLocation = due.location || examWindow.location;
   const source = contentCandidate || newInstanceCandidate;
   const instance = contentCandidate?.parts.kind === "assessment_instance";
   const assessmentId = instance ? null : (contentCandidate?.parts.id || newInstanceCandidate?.parts.id || null);
@@ -161,6 +209,8 @@ function parseAssessmentRow(row, location, course) {
     dueText: due.dueText,
     timezone: due.timezone,
     rawDueText: due.rawVisible,
+    location: examLocation || null,
+    durationMinutes: durationMinutes || null,
     kind: instance ? "assessment_instance" : "assessment",
   };
 }
@@ -217,6 +267,8 @@ function extractAssignments(document, location = window.location) {
         dueText: resolved.dueText,
         timezone: resolved.timezone,
         rawDueText: resolved.rawDueText,
+        location: resolved.location || item.location || null,
+        durationMinutes: resolved.durationMinutes || item.durationMinutes || null,
       };
     });
 }
@@ -242,6 +294,8 @@ function resolveAssessmentData(item, base) {
     dueText: item.dueText || base?.dueText || null,
     timezone: item.timezone || base?.timezone || null,
     rawDueText: item.rawDueText || base?.rawDueText || null,
+    location: item.location || base?.location || null,
+    durationMinutes: item.durationMinutes || base?.durationMinutes || null,
   };
 }
 
@@ -253,6 +307,7 @@ function extractAssignmentDetail(document, location = window.location) {
   const card = document.querySelector("main .card") || document;
   const accessButton = card.querySelector('[aria-label="Access details"]');
   const due = parseDueInfo(card.textContent, accessButton?.getAttribute("data-bs-content"));
+  const durationMinutes = parseExamDurationMinutes(due.rawVisible, parseExamWindow(accessButton?.getAttribute("data-bs-content")));
   const title = normalizeInstanceTitle(document.querySelector("main h1")?.textContent);
   return {
     id: stableAssignmentKey({ courseInstanceId: parts.courseInstanceId, fallbackId: parts.id }),
@@ -267,6 +322,8 @@ function extractAssignmentDetail(document, location = window.location) {
     dueText: due.dueText,
     timezone: due.timezone,
     rawDueText: due.rawVisible,
+    location: due.location || parseLocationFromDetails(accessButton?.getAttribute("data-bs-content")) || null,
+    durationMinutes: durationMinutes || null,
   };
 }
 
@@ -283,6 +340,9 @@ const api = {
   normalizeText,
   pageType,
   parseDueInfo,
+  parseExamWindow,
+  parseExamDurationMinutes,
+  parseLocationFromDetails,
   parsePercentage,
   pathParts,
   resolveAssessmentData,

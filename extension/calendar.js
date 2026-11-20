@@ -372,6 +372,7 @@ function eventResource(assignment, calendarId, colorId, reminderMinutes) {
     description: `PrairieLearn source: ${assignment.sourceUrl}`,
     start: { dateTime: start, timeZone: "UTC" },
     end: { dateTime: end, timeZone: "UTC" },
+    ...(assignment.location ? { location: String(assignment.location) } : {}),
     reminders: { useDefault: false, overrides: assignment.completionStatus === "completed" ? [] : [{ method: "popup", minutes: reminderMinutes }] },
     ...(colorId ? { colorId } : {}),
     extendedProperties: { private: { prairieRun: "1", assignmentId: assignment.id, sourceUrl: assignment.sourceUrl, calendarId } },
