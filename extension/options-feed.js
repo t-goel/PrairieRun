@@ -1,9 +1,10 @@
-// PrairieRun feed section inside the unified Calendar card: one-click anonymous
-// .ics activation, on-demand publishing, the stable subscription URL, and a
-// collapsed "Same feed on another browser" details for Convex device linking.
-// Google sign-in/status/layout radios live in options-dashboard.js; feed errors
-// stay in this section's own status line, never in the Google auth error slot.
-// The feed auto-updates after every successful source sync via outputs.js -> PrairieRunRelay.autoPublish.
+// PrairieRun Calendar card's ICS export: one-click anonymous .ics activation,
+// on-demand publishing, the stable subscription URL. Google sign-in/status/
+// layout radios live in options-dashboard.js; the Google section is the other
+// Calendar option and device linking is not offered here anymore.
+// Feed errors stay in this section's own status line, never in the Google auth
+// error slot. The feed auto-updates after every successful source sync via
+// outputs.js -> PrairieRunRelay.autoPublish.
 // All extension APIs go through PrairieRunExt; nothing here touches chrome.*.
 (function () {
   const SETTINGS_KEY = "prairierunSettings";
@@ -207,14 +208,14 @@
     const feedAuthApi = auth();
     const defaultRelayUrl = relayApi.DEFAULT_RELAY_URL || FALLBACK_RELAY_URL;
 
-    // Subscription URL first (the thing users subscribe to), then the Copy
-    // feed URL action, then this section's own status line. Heading-only
-    // chrome: the unified "Calendar" h2 has no subtitle.
+    // ICS export: subscription URL, Copy feed URL action, and this
+    // section's own status line. The Google sign-in lives in the dashboard's
+    // auth controls above; device linking is not offered here.
     const actions = make("div", { className: "prr-feed-actions" });
     const urlRow = make("div", { className: "auth-redirect-row prr-feed-url-row", hidden: "hidden" });
     const urlLabel = make("span", { className: "prr-feed-url-label", hidden: "hidden" }, "All courses");
     const urlCode = make("code", {});
-    const copyButton = make("button", { className: "secondary", type: "button" }, "Copy");
+    const copyButton = make("button", { className: "secondary", type: "button" }, "Copy feed URL");
     wireCopyButton(copyButton, () => urlCode.textContent || "");
     urlRow.append(urlLabel, urlCode, copyButton);
 
@@ -226,70 +227,11 @@
 
     const statusLine = make("p", { className: "muted", "data-prr-feed-status": "1" });
 
-    // Device linking is secondary: tucked into a collapsed details so the
-    // primary Copy feed URL action stays uncluttered. Its status stays here too.
-    const devicesDetails = make("details", { className: "auth-details calendar-devices" });
-    devicesDetails.appendChild(make("summary", {}, "Same feed on another browser"));
-    const devicesBody = make("div", { className: "calendar-devices-body" });
-    const devicesActions = make("div", { className: "prr-feed-actions" });
-    const devicesStatus = make("p", { className: "muted", "data-prr-feed-status": "1" });
-    devicesBody.append(devicesActions, devicesStatus);
-    devicesDetails.appendChild(devicesBody);
-
-    root.append(urlRow, courseFeedsList, actions, statusLine, devicesDetails);
-
-    // Optional: sync the same anonymous .ics feed identity across browsers
-    // (Convex). Google sign-in lives in the dashboard's auth controls above.
-    const signInButton = make("button", { type: "button", className: "secondary" }, "Sync across devices");
-    signInButton.addEventListener("click", async () => {
-      signInButton.disabled = true;
-      try {
-        if (!feedAuthApi || typeof feedAuthApi.authenticateAndHydrate !== "function") {
-          throw new Error("Feed authentication module is unavailable.");
-        }
-        devicesStatus.textContent = "Linking feed across devices…";
-        const authResult = await feedAuthApi.authenticateAndHydrate({
-          relayUrl: defaultRelayUrl,
-        });
-
-        const relayUrl = authResult.relayUrl || defaultRelayUrl;
-        try {
-          if (!(await relayApi.hasRelayPermission(relayUrl))) {
-            await ext().permissionsRequest([`${originOf(relayUrl)}/*`]);
-          }
-        } catch { /* CORS handles page publish */ }
-
-        let result = await publishNow();
-        if (!result?.ok && /Copy feed URL|401|rejected/i.test(String(result?.error || ""))) {
-          if (typeof feedAuthApi.refreshFeedCredentials === "function") {
-            await feedAuthApi.refreshFeedCredentials({ relayUrl: defaultRelayUrl });
-            result = await publishNow();
-          }
-        }
-        devicesStatus.textContent = "";
-      } catch (error) {
-        devicesStatus.textContent = error?.message || "Could not link the feed across devices.";
-      } finally {
-        signInButton.disabled = false;
-      }
-    });
-
-    const signOutButton = make("button", { type: "button", className: "secondary" }, "Unlink devices");
-    signOutButton.addEventListener("click", async () => {
-      signOutButton.disabled = true;
-      try {
-        devicesStatus.textContent = "Unlinking…";
-        if (feedAuthApi && typeof feedAuthApi.signOut === "function") {
-          await feedAuthApi.signOut({});
-        }
-        await refresh();
-        devicesStatus.textContent = "";
-      } catch (error) {
-        devicesStatus.textContent = error?.message || "Could not unlink devices.";
-      } finally {
-        signOutButton.disabled = false;
-      }
-    });
+    // The ICS option is the anonymous subscribe path: Google sign-in is the
+    // other option on the Google Calendar section above; device linking is
+    // not offered here.
+    const label = make("p", { className: "muted calendar-feed-label" }, "Anonymous ICS export");
+    root.append(label, urlRow, courseFeedsList, actions, statusLine);
 
     // Mint/repair feed credentials, publish, return subscription URL or "".
     async function ensureFeedUrl() {
@@ -331,7 +273,7 @@
       loaded = await loadAll();
       let result = await relayApi.publishFromUserGesture(loaded.items, loaded.settings, loaded.secrets);
 
-      // Stale key after device-link: refresh from Convex, then hard-claim if needed.
+      // Stale key after Google account linking: refresh from Convex, then hard-claim if needed.
       if (!result?.ok && /Copy feed URL|401|rejected|publish key/i.test(String(result?.error || ""))) {
         if (
           authAccount === "google"
@@ -398,11 +340,9 @@
       }
     });
 
-    let currentSettings = {};
     let relayInfo = {};
     let feedState = null;
     let autoPublishAttempted = false;
-    let credRefreshAttempted = false;
 
     // Publish the stored deadlines with the key currently saved for the card
     async function publishNow() {
@@ -439,13 +379,9 @@
         relayApi.readState(),
         loadCourseFeeds(relayApi),
       ]);
-      currentSettings = loaded.settings;
       relayInfo = loaded.settings.relay && typeof loaded.settings.relay === "object" ? loaded.settings.relay : {};
       feedState = state;
       const configured = Boolean(relayInfo.relayUrl && relayInfo.feedId && loaded.secrets.relayPublishKey);
-      const isGoogleAuth = relayInfo.authAccount === "google";
-      void currentSettings;
-      void feedState;
 
       // Copy only ever shows a published blob .ics URL — never the relay host.
       const publishReady = isSubscriptionUrl(state?.url);
@@ -455,28 +391,9 @@
 
       actions.textContent = "";
       actions.appendChild(copyFeedButton);
-      devicesActions.textContent = "";
-      devicesActions.appendChild(isGoogleAuth ? signOutButton : signInButton);
 
       const noisy = /already exists|allowOverwrite/i.test(state?.error || "");
       const showError = state?.state === "error" && state?.error && !noisy;
-      const needsCredRefresh = isGoogleAuth
-        && showError
-        && /Could not update|Copy feed URL|publish key|401/i.test(state.error || "");
-
-      if (needsCredRefresh && !credRefreshAttempted && feedAuthApi?.refreshFeedCredentials) {
-        credRefreshAttempted = true;
-        statusLine.textContent = "Refreshing feed…";
-        void (async () => {
-          try {
-            await feedAuthApi.refreshFeedCredentials({ relayUrl: defaultRelayUrl });
-            await publishNow();
-          } catch (error) {
-            statusLine.textContent = error?.message || state.error;
-          }
-        })();
-        return;
-      }
 
       if (!publishReady) {
         if (showError) {
@@ -495,16 +412,8 @@
 
       if (showError) {
         statusLine.textContent = state.error;
-      } else if (state?.publishedAt) {
-        statusLine.textContent = "";
-        const icon = makeCalendarIcon();
-        if (icon) statusLine.appendChild(icon);
-        const label = isGoogleAuth
-          ? `${formatPublishedAt(state.publishedAt)} · signed in`
-          : `${formatPublishedAt(state.publishedAt)} · ready`;
-        statusLine.appendChild(document.createTextNode(label));
       } else {
-        statusLine.textContent = isGoogleAuth ? "Signed in · feed ready" : "Feed ready";
+        statusLine.textContent = "Feed ready";
       }
     }
 

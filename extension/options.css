@@ -206,8 +206,7 @@ button.secondary {
   padding-top: 14px;
   border-top: 2px solid var(--ink);
 }
-.calendar-devices { margin-top: 12px; }
-.calendar-devices-body { margin-top: 4px; }
+.calendar-feed-label { font-weight: 500; margin-bottom: 4px; }
 .auth-redirect-row {
   display: flex;
   gap: 8px;

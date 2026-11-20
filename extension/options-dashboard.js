@@ -116,8 +116,7 @@ function renderAuthStatus(status = {}) {
     return;
   }
   if (status.connected) {
-    const expiry = status.expiresAt ? `, expires ${new Date(status.expiresAt).toLocaleString()}` : "";
-    authStatusElement.textContent = `Signed in${expiry}.`;
+    authStatusElement.textContent = "Signed in";
     if (authConnectButton) authConnectButton.hidden = true;
     if (authDisconnectButton) authDisconnectButton.hidden = false;
     applyCalendarLayoutUi(true);
