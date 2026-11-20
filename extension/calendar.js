@@ -59,7 +59,7 @@ async function getOAuthClientId() {
   // baked-in Chrome development client so existing installs keep working.
   // A placeholder REPLACE value is a misconfiguration and must surface.
   if (typeof globalThis.PrairieRunOAuthConfig?.clientId === "string") {
-    throw new Error("The Google OAuth client ID is not configured. See extension/google-calendar-setup.md and set extension/oauth-config.js.");
+    throw new Error("Google Calendar sign-in is not available in this build.");
   }
   return CHROME_OAUTH_CLIENT_ID;
 }
@@ -95,6 +95,7 @@ function toActionableAuthError(error, redirectUri) {
   const raw = String(error?.message || error || "");
   const kind = utils ? utils.classifyAuthError(raw) : "other";
   if (kind === "redirect_mismatch") return actionableAuthError("redirect_mismatch", redirectUri, raw);
+  if (kind === "auth_busy") return actionableAuthError("auth_busy", redirectUri, raw);
   if (kind === "invalid_client") return actionableAuthError("invalid_client", redirectUri, raw);
   if (kind === "cancelled") return actionableAuthError("cancelled", redirectUri, raw);
   if (kind === "unauthorized") return actionableAuthError("unauthorized", redirectUri, raw);
@@ -272,13 +273,44 @@ async function listWritableCalendars(token) {
   return calendars;
 }
 
+function classCalendarSummaries(courseName) {
+  const label = courseName || "Class";
+  return [`PrairieRun — ${label}`, `PrairieLearn — ${label}`];
+}
+
 async function getOrCreateClassCalendar(courseName, calendars, token) {
-  const summary = `PrairieLearn — ${courseName || "Class"}`;
-  const existing = calendars.find((calendar) => calendar.summary === summary);
+  const [preferred, legacy] = classCalendarSummaries(courseName);
+  const existing = calendars.find((calendar) => calendar.summary === preferred)
+    || calendars.find((calendar) => calendar.summary === legacy);
   if (existing) return existing;
-  const created = await calendarRequest("/calendars", { method: "POST", body: JSON.stringify({ summary, description: `Assignments imported from PrairieLearn for ${courseName || "this class"}` }) }, token);
+  const created = await calendarRequest("/calendars", {
+    method: "POST",
+    body: JSON.stringify({
+      summary: preferred,
+      description: `Assignments synced by PrairieRun for ${courseName || "this class"}`,
+    }),
+  }, token);
   calendars.push(created);
   return created;
+}
+
+async function getOrCreatePrairieRunCalendar(calendars, token) {
+  const summary = "PrairieRun";
+  const existing = calendars.find((calendar) => calendar.summary === summary);
+  if (existing) return existing;
+  const created = await calendarRequest("/calendars", {
+    method: "POST",
+    body: JSON.stringify({
+      summary,
+      description: "All assignments synced by PrairieRun",
+    }),
+  }, token);
+  calendars.push(created);
+  return created;
+}
+
+function calendarLayoutFromSettings(settings) {
+  return settings?.googleCalendarLayout === "single" ? "single" : "per_course";
 }
 
 function timezoneOffset(timezone) {
@@ -294,15 +326,52 @@ function eventDateTime(local, timezone) {
   return date.toISOString();
 }
 
+function examWindow(assignment) {
+  // Exam-shaped deadlines may carry startAt/endAt in ISO form; eventResource
+  // converts them to central wall time through the deadline model when available.
+  const model = globalThis.PrairieRunModel;
+  const startIso = assignment?.startAt || assignment?.examStartAt || null;
+  const endIso = assignment?.endAt || assignment?.examEndAt || null;
+  if (startIso && endIso && typeof model?.utcToCentralWall === "function") {
+    const startWall = model.utcToCentralWall(startIso);
+    const endWall = model.utcToCentralWall(endIso);
+    return { start: eventDateTime(startWall.local, startWall.timezone), end: eventDateTime(endWall.local, endWall.timezone) };
+  }
+  if (startIso && endIso) {
+    const start = new Date(startIso);
+    const end = new Date(endIso);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+    return { start: start.toISOString(), end: end.toISOString() };
+  }
+  return null;
+}
+
 function eventResource(assignment, calendarId, colorId, reminderMinutes) {
-  const end = eventDateTime(assignment.dueAtLocal, assignment.timezone);
-  const endDate = new Date(end);
-  const startDate = new Date(endDate.getTime() - 60 * 60 * 1000);
+  const model = globalThis.PrairieRunModel;
+  const exam = examWindow(assignment);
+  let end;
+  let start;
+  if (exam) {
+    end = exam.end;
+    start = exam.start;
+  } else {
+    if (assignment.dueAtLocal) {
+      end = eventDateTime(assignment.dueAtLocal, assignment.timezone);
+    } else if (assignment.dueAt && model?.utcToCentralWall) {
+      const wall = model.utcToCentralWall(assignment.dueAt);
+      end = eventDateTime(wall.local, wall.timezone);
+    } else {
+      throw new Error("Invalid due date: none");
+    }
+    const minutes = Math.max(1, Math.min(240, Math.round(assignment.durationMinutes) || 15));
+    const endDate = new Date(end);
+    start = new Date(endDate.getTime() - minutes * 60 * 1000).toISOString();
+  }
   return {
     summary: `[${assignment.courseName}] ${assignment.title}`,
     description: `PrairieLearn source: ${assignment.sourceUrl}`,
-    start: { dateTime: startDate.toISOString(), timeZone: "UTC" },
-    end: { dateTime: endDate.toISOString(), timeZone: "UTC" },
+    start: { dateTime: start, timeZone: "UTC" },
+    end: { dateTime: end, timeZone: "UTC" },
     reminders: { useDefault: false, overrides: assignment.completionStatus === "completed" ? [] : [{ method: "popup", minutes: reminderMinutes }] },
     ...(colorId ? { colorId } : {}),
     extendedProperties: { private: { prairieRun: "1", assignmentId: assignment.id, sourceUrl: assignment.sourceUrl, calendarId } },
@@ -405,8 +474,11 @@ async function findParentCandidatesOnce(assignments) {
   const candidates = new Map();
   for (const item of unresolved) {
     const course = String(item.courseInstanceId);
+    const [preferred, legacy] = classCalendarSummaries(item.courseName);
     const relatedCalendars = calendars.filter((calendar) => calendar.id === mappings[course]
-      || calendar.summary === `PrairieLearn — ${item.courseName}`);
+      || calendar.summary === preferred
+      || calendar.summary === legacy
+      || calendar.summary === "PrairieRun");
     for (const calendar of relatedCalendars) {
       if (!eventCache.has(calendar.id)) eventCache.set(calendar.id, await listMarkedEvents(calendar.id, token));
       for (const event of eventCache.get(calendar.id)) {
@@ -472,15 +544,23 @@ async function inspectAssignmentEventsOnce(assignments) {
   if (!dated.length) return { missingIds: [], duplicateIds: [] };
   const token = await getCalendarToken();
   const calendars = await listWritableCalendars(token);
-  const stored = await PrairieRunExt.storageLocalGet(CALENDAR_MAPPINGS_KEY);
+  const stored = await PrairieRunExt.storageLocalGet([CALENDAR_MAPPINGS_KEY, "prairierunSettings"]);
   const mappings = stored[CALENDAR_MAPPINGS_KEY] || {};
   const cache = new Map();
   const missingIds = [];
   const duplicateIds = [];
+  const layout = calendarLayoutFromSettings(stored.prairierunSettings);
+  const singleCalendar = layout === "single"
+    ? calendars.find((entry) => entry.summary === "PrairieRun")
+    : null;
   for (const item of dated) {
     const courseKey = item.courseInstanceId || item.courseName;
-    const calendar = calendars.find((entry) => entry.id === mappings[courseKey])
-      || calendars.find((entry) => entry.summary === `PrairieLearn — ${item.courseName || "Class"}`);
+    const [preferred, legacy] = classCalendarSummaries(item.courseName);
+    const calendar = layout === "single"
+      ? ((mappings[courseKey] ? calendars.find((entry) => entry.id === mappings[courseKey] && entry.summary === "PrairieRun") : null) || singleCalendar)
+      : ((mappings[courseKey] ? calendars.find((entry) => entry.id === mappings[courseKey] && entry.summary !== "PrairieRun") : null)
+        || calendars.find((entry) => entry.summary === preferred)
+        || calendars.find((entry) => entry.summary === legacy));
     if (!calendar) { missingIds.push(item.id); continue; }
     if (!cache.has(calendar.id)) cache.set(calendar.id, await listMarkedEvents(calendar.id, token));
     const matches = await findMarkedEvents(item, calendar.id, token, cache.get(calendar.id));
@@ -503,16 +583,25 @@ async function runExportOnce(assignments) {
   const sync = stored[CALENDAR_SYNC_KEY] || {};
   const generations = stored[CALENDAR_GENERATIONS_KEY] || {};
   const reminderMinutes = Math.max(0, Math.min(10080, Number(stored.prairierunSettings?.notificationLeadMinutes) || 240));
+  const layout = calendarLayoutFromSettings(stored.prairierunSettings);
   const results = [];
   const eventCache = new Map();
   const courseKeys = [...new Set(assignments.map((assignment) => assignment.courseInstanceId || assignment.courseName))];
   const colorPlan = await getColorPlan(token, courseKeys);
+  let sharedCalendar = null;
+  if (layout === "single") {
+    sharedCalendar = await getOrCreatePrairieRunCalendar(calendars, token);
+  }
   for (const assignment of assignments) {
     if (!assignment.dueAtLocal) { results.push({ assignment, status: "skipped", reason: "Missing due date" }); continue; }
     try {
       const courseKey = assignment.courseInstanceId || assignment.courseName;
-      const mappedCalendar = mappings[courseKey] ? calendars.find((item) => item.id === mappings[courseKey]) : null;
-      const calendar = mappedCalendar || await getOrCreateClassCalendar(assignment.courseName, calendars, token);
+      const mappedCalendar = mappings[courseKey]
+        ? calendars.find((item) => item.id === mappings[courseKey] && item.summary !== "PrairieRun")
+        : null;
+      const calendar = layout === "single"
+        ? sharedCalendar
+        : (mappedCalendar || await getOrCreateClassCalendar(assignment.courseName, calendars, token));
       if (!calendar) throw new Error(`Could not find a calendar for ${assignment.courseName}.`);
       mappings[courseKey] = calendar.id;
       const classColorId = colorPlan.classColors[courseKey];
@@ -604,7 +693,7 @@ async function removeAssignmentEvent(assignment) {
   return queueWrite(() => removeAssignmentEventNow(snapshot));
 }
 
-globalThis.PrairieRunCalendar = { exportAssignments, removeAssignmentEvent,
+globalThis.PrairieRunCalendar = { exportAssignments, removeAssignmentEvent, eventResource, examWindow,
   findParentCandidates,
   inspectAssignmentEvents,
   exportAssignmentsNow,
@@ -617,5 +706,9 @@ globalThis.PrairieRunCalendar = { exportAssignments, removeAssignmentEvent,
   getOAuthClientId,
   getClientId: getClientIdSync,
   AuthRequiredError,
+  getOrCreateClassCalendar,
+  getOrCreatePrairieRunCalendar,
+  classCalendarSummaries,
+  calendarLayoutFromSettings,
 };
 })();

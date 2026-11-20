@@ -4,6 +4,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
+require('../extension/deadline-model.js');
+require('../extension/calendar.js');
+const calendarApi = globalThis.PrairieRunCalendar;
+
 test('upgrade repairs unchanged past-due assignments, retries failures, then stops forcing exports', async () => {
   const oldTime = Date.now();
   const local = { prairierunLastDailyCalendarSync: oldTime };
@@ -200,4 +204,45 @@ test('refresh restores externally deleted events immediately, then skips unchang
   await run();
   assert.equal(exports, 2);
   assert.equal(local.prairierunSyncStatus.state, 'error');
+});
+
+test('eventResource uses a 15-minute default and honors durationMinutes for due-dated items', () => {
+  const makeItem = (id, durationMinutes) => globalThis.PrairieRunModel.makeDeadlineItem({
+    id,
+    source: 'prairielearn',
+    title: 'Intro HW',
+    url: 'https://us.prairielearn.com/pl/course_instance/1/assessment/2/',
+    courseName: 'CS 101',
+    courseInstanceId: '1',
+    dueAt: '2026-10-20T16:00:00.000Z',
+    syncState: 'synced',
+    ...(durationMinutes ? { durationMinutes } : {}),
+  });
+  const item = makeItem('pl:1:assessment:2');
+  assert.equal(item.durationMinutes, 15);
+  const item2 = makeItem('pl:1:assessment:3', 20);
+  assert.equal(item2.durationMinutes, 20);
+  const due = calendarApi.eventResource(item, 'cal', null, 30);
+  const span = new Date(due.end.dateTime).getTime() - new Date(due.start.dateTime).getTime();
+  assert.equal(span, 15 * 60 * 1000);
+  const due2 = calendarApi.eventResource(item2, 'cal', null, 30);
+  assert.equal(new Date(due2.end.dateTime).getTime() - new Date(due2.start.dateTime).getTime(), 20 * 60 * 1000);
+});
+
+test('eventResource uses startAt/endAt window for exam-shaped items', () => {
+  const exam = globalThis.PrairieRunModel.makeDeadlineItem({
+    id: 'pl:9:assessment:11',
+    source: 'prairielearn',
+    title: 'Exam',
+    url: 'https://e.com',
+    dueAt: '2026-11-20T19:30:00.000Z',
+    startAt: '2026-11-20T18:00:00.000Z',
+    endAt: '2026-11-20T19:30:00.000Z',
+  });
+  const legacy = globalThis.PrairieRunModel.toLegacyPlAssignment(exam, {});
+  assert.equal(legacy.startAt, '2026-11-20T18:00:00.000Z');
+  assert.equal(legacy.endAt, '2026-11-20T19:30:00.000Z');
+  const resource = calendarApi.eventResource(legacy, 'cal', null, 30);
+  assert.equal(new Date(resource.start.dateTime).getTime(), new Date('2026-11-20T18:00:00.000Z').getTime());
+  assert.equal(new Date(resource.end.dateTime).getTime(), new Date('2026-11-20T19:30:00.000Z').getTime());
 });

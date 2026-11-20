@@ -143,6 +143,9 @@
       aliases: Array.isArray(partial.aliases) ? [...partial.aliases] : [],
       rawDueText: partial.rawDueText != null ? partial.rawDueText : null,
       sourceTimezone: partial.sourceTimezone != null ? partial.sourceTimezone : null,
+      durationMinutes: typeof partial.durationMinutes === "number" && Number.isFinite(partial.durationMinutes) && partial.durationMinutes > 0
+        ? Math.min(240, Math.round(partial.durationMinutes))
+        : 15,
       pl: partial.pl != null ? { ...partial.pl } : undefined,
       fetchedAt: partial.fetchedAt || now,
     };
@@ -186,6 +189,9 @@
       aliases: [...(a.assignmentAliases || [])],
       rawDueText: a.rawDueText != null ? a.rawDueText : (a.dueText != null ? a.dueText : null),
       sourceTimezone: a.timezone || null,
+      durationMinutes: typeof a.durationMinutes === "number" && Number.isFinite(a.durationMinutes) && a.durationMinutes > 0
+        ? Math.min(240, Math.round(a.durationMinutes))
+        : 15,
       pl: {
         assessmentId,
         instanceId,
@@ -251,6 +257,15 @@
       timezone = null;
     }
     const completionStatus = item.status === "completed" ? "completed" : item.status === "unknown" ? "unknown" : "incomplete";
+    let startAt = item.startAt ?? existing.startAt ?? null;
+    let endAt = item.endAt ?? existing.endAt ?? null;
+    if (item.dueAt && startAt == null && endAt == null) {
+      // Plumb exam-style windows: adapters that capture a range can carry
+      // startAt/endAt; when absent, exams fall back to the 15-min default.
+      startAt = item.dueAt;
+      timezone = timezone || "America/Chicago";
+    }
+    const legacyDuration = item.durationMinutes ?? existing.durationMinutes;
     return {
       ...existing,
       id: String(item.id),
@@ -268,6 +283,11 @@
       completionStatus,
       dueAtLocal,
       timezone,
+      durationMinutes: typeof legacyDuration === "number" && Number.isFinite(legacyDuration) && legacyDuration > 0
+        ? Math.min(240, Math.round(legacyDuration))
+        : 15,
+      startAt: item.startAt ?? existing.startAt ?? null,
+      endAt: item.endAt ?? existing.endAt ?? null,
       rawDueText: item.rawDueText ?? existing.rawDueText ?? null,
       dueText: item.rawDueText ?? existing.dueText ?? null,
     };
@@ -296,6 +316,7 @@
     makeDeadlineItem,
     localToUtc,
     formatCentral,
+    utcToCentralWall,
     fromLegacyPlAssignment,
     toLegacyPlAssignment,
     fingerprint,

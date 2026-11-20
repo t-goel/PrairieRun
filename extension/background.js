@@ -4,6 +4,9 @@
 // undefined or the modules already exist, so this is a no-op there.
 if (typeof importScripts === "function" && !globalThis.PrairieRunCalendar) importScripts("compat.js", "oauth-config.js", "auth-utils.js", "deadline-model.js", "source-registry.js", "net.js", "parse-host.js", "prairielearn-adapter.js", "identity-resolver.js", "source-prairielearn.js", "source-canvas.js", "source-gradescope.js", "source-prairietest.js", "source-courseweb.js", "ics-parse.js", "ics-writer.js", "deadline-store.js", "outputs.js", "relay-push.js", "calendar.js", "sync-orchestrator.js");
 
+// Page contexts proxy launchWebAuthFlow here so Calendar + feed share one mutex.
+globalThis.__PRAIRIERUN_AUTH_HOST = true;
+
 const ASSIGNMENTS_KEY = "prairierunAssignments";
 const SYNC_KEY = "prairierunSyncStatus";
 const SETTINGS_KEY = "prairierunSettings";
@@ -11,19 +14,29 @@ const BACKGROUND_CALENDAR_SYNC_KEY = "prairierunCalendarSync";
 const DAILY_CALENDAR_SYNC_KEY = "prairierunLastDailyCalendarSync";
 const CALENDAR_REPAIR_VERSION_KEY = "prairierunCalendarRepairVersion";
 const CALENDAR_REPAIR_VERSION = 2;
-// Direct Google OAuth sync UI is hidden; Calendar feed is the first-class path.
-// Flip this when re-enabling the dashboard/home-panel Connect surfaces.
+// Direct Google Calendar API sync: Sign in writes events to Google Calendar.
+// Anonymous users keep the Calendar feed (.ics) path instead.
 // Tests may override via globalThis.PRAIRIERUN_DIRECT_GOOGLE_SYNC.
 const DIRECT_GOOGLE_SYNC_ENABLED =
   typeof globalThis.PRAIRIERUN_DIRECT_GOOGLE_SYNC === "boolean"
     ? globalThis.PRAIRIERUN_DIRECT_GOOGLE_SYNC
-    : false;
+    : true;
 const ASSIGNMENT_LINKS_KEY = "prairierunAssignmentLinks";
 const DAILY_CALENDAR_SYNC_ALARM = "prairierun-daily-calendar-sync";
 const DAILY_CALENDAR_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const BACKGROUND_SYNC_ALARM = "prairierun-sync";
 const DEBUG_LOG_KEY = "prairierunDebugLog";
-const defaultSettings = { prairieLearnOrigin: "https://us.prairielearn.com", completionThreshold: 95, defaultReminderMinutes: 10, notificationLeadMinutes: 240, showUndatedAssignments: false, assignmentView: "class", syncIntervalMinutes: 60 };
+const defaultSettings = {
+  prairieLearnOrigin: "https://us.prairielearn.com",
+  completionThreshold: 95,
+  defaultReminderMinutes: 10,
+  notificationLeadMinutes: 240,
+  showUndatedAssignments: false,
+  assignmentView: "class",
+  syncIntervalMinutes: 60,
+  // per_course = one Google calendar per course; single = one "PrairieRun" calendar.
+  googleCalendarLayout: "per_course",
+};
 let scanInFlight = false;
 let dailySyncInFlight = false;
 let queuedScan = false;
@@ -183,6 +196,131 @@ function authRequiredStatus() {
   return { state: "auth_required", source: "google", current: "Connect Google Calendar to sync." };
 }
 
+async function loadGoogleCalendarExportItems() {
+  const stored = await PrairieRunExt.storageLocalGet([ASSIGNMENTS_KEY, "prairierunDeadlines"]);
+  const deadlines = Array.isArray(stored.prairierunDeadlines) ? stored.prairierunDeadlines : [];
+  const legacyAssignments = Array.isArray(stored[ASSIGNMENTS_KEY]) ? stored[ASSIGNMENTS_KEY] : [];
+  const legacyById = new Map(legacyAssignments.map((item) => [item?.id, item]));
+
+  const datedDeadlines = deadlines.filter((item) => item && (item.dueAt || item.dueAtLocal) && item.syncState !== "stale");
+  if (datedDeadlines.length) {
+    return datedDeadlines
+      .map((item) => {
+        const existing = legacyById.get(item.id) || {};
+        if (item.dueAtLocal && !item.dueAt && item.courseName) {
+          return { ...existing, ...item };
+        }
+        let legacy = item;
+        if (globalThis.PrairieRunModel?.toLegacyPlAssignment) {
+          try {
+            legacy = globalThis.PrairieRunModel.toLegacyPlAssignment(item, existing);
+          } catch {
+            legacy = { ...existing, ...item };
+          }
+        }
+        if (!legacy.dueAtLocal && legacy.dueAt && globalThis.PrairieRunModel?.utcToCentralWall) {
+          try { legacy.dueAtLocal = globalThis.PrairieRunModel.utcToCentralWall(legacy.dueAt).local; } catch { /* keep dueAt */ }
+        }
+        return {
+          ...legacy,
+          courseInstanceId: String(legacy.courseInstanceId || item.courseKey || item.courseCode || item.courseName || ""),
+          courseName: legacy.courseName || item.courseName || item.courseCode || item.courseKey || "PrairieRun",
+          syncState: legacy.syncState || item.syncState || "synced",
+        };
+      })
+      .filter((item) => item && item.dueAtLocal && item.syncState !== "stale");
+  }
+
+  return legacyAssignments.filter((item) => item && item.dueAtLocal && item.syncState !== "stale");
+}
+
+async function syncGoogleCalendarFromStore(reason = "store") {
+  if (!DIRECT_GOOGLE_SYNC_ENABLED) return { skipped: "disabled" };
+  if (!globalThis.PrairieRunCalendar?.exportAssignments) return { skipped: "calendar_unavailable" };
+
+  const items = await loadGoogleCalendarExportItems();
+  if (!items.length) {
+    await setSyncStatus({
+      state: "complete",
+      current: "No dated assignments to sync.",
+      found: 0,
+      source: "google",
+    });
+    return { skipped: "empty" };
+  }
+
+  debugLog("Synchronizing Google Calendar from store", { reason, count: items.length });
+  await setSyncStatus({
+    state: "syncing",
+    current: "Synchronizing Google Calendar…",
+    source: "google",
+    found: items.length,
+  });
+
+  try {
+    const results = await PrairieRunCalendar.exportAssignments(items);
+    const stored = await PrairieRunExt.storageLocalGet(ASSIGNMENTS_KEY);
+    const current = stored[ASSIGNMENTS_KEY] || [];
+    applyExportResults(results, current);
+    const failed = results.filter((result) => result.status === "failed");
+    const updates = { [ASSIGNMENTS_KEY]: current };
+    if (!failed.length) {
+      updates[DAILY_CALENDAR_SYNC_KEY] = Date.now();
+      updates[CALENDAR_REPAIR_VERSION_KEY] = CALENDAR_REPAIR_VERSION;
+    }
+    await PrairieRunExt.storageLocalSet(updates);
+
+    if (failed.length) {
+      await setSyncStatus({
+        state: "error",
+        current: `${failed.length} Calendar assignment(s) could not sync: ${failed[0].reason || "Unknown error"}`,
+        source: "google",
+        found: items.length,
+      });
+      return { ok: false, failed: failed.length };
+    }
+
+    const removed = results.reduce((total, result) => total + (result.removedDuplicates || 0), 0);
+    const synced = results.filter((result) => ["added", "updated"].includes(result.status)).length;
+    const messages = ["Google Calendar synced."];
+    if (synced) messages.push(`${synced} event(s) synced.`);
+    if (removed) messages.push(`Removed ${removed} duplicate event(s).`);
+    await setSyncStatus({
+      state: "complete",
+      current: messages.join(" "),
+      source: "google",
+      found: items.length,
+      synced,
+      removedDuplicates: removed,
+    });
+
+    try {
+      const tabs = await PrairieRunExt.tabsQuery?.({ url: "https://us.prairielearn.com/*" });
+      if (tabs?.length) {
+        await Promise.all(tabs.filter((tab) => tab.id).map((tab) => sendHomeUpdate(tab.id, current, results)));
+      }
+    } catch { /* ignore tab query errors */ }
+
+    return { ok: true, synced, removed };
+  } catch (error) {
+    if (isAuthRequiredError(error)) {
+      debugLog("Calendar sync needs sign-in", { error: error.message });
+      await setSyncStatus(authRequiredStatus());
+      return { skipped: "auth_required" };
+    }
+    await setSyncStatus({
+      state: "error",
+      current: `Google Calendar: ${error?.message || String(error)}`,
+      source: "google",
+    });
+    throw error;
+  }
+}
+
+function calendarLayoutFromSettings(value) {
+  return value === "single" ? "single" : "per_course";
+}
+
 function waitForTabComplete(tabId) {
   debugLog("Waiting for tab to finish loading", { tabId });
   return new Promise((resolve, reject) => {
@@ -326,7 +464,19 @@ async function notifyHomeTab(tabId, assignments, detectedIds) {
       return;
     }
   }
-  const eligible = assignments.filter((item) => (dailySyncDue || detectedIds.has(item.id) || eventRepairIds.has(item.id)) && item.dueAtLocal && item.syncState !== "stale" && (dailySyncDue || item.identityRepairPending || eventRepairIds.has(item.id) || isCurrentAssignment(item)));
+  const changedAfterSync = new Map();
+  try {
+    const calendarSync = stored[BACKGROUND_CALENDAR_SYNC_KEY] || {};
+    for (const item of assignments) {
+      const syncedAt = new Date(calendarSync[item.id]?.lastSyncedAt || 0).getTime();
+      if (!syncedAt) continue;
+      const updatedAt = new Date(item.updatedAt || item.fetchedAt || 0).getTime();
+      if (updatedAt > syncedAt) changedAfterSync.set(item.id, true);
+    }
+  } catch { /* read-only advisory */ }
+  const eligible = assignments.filter((item) => (dailySyncDue || detectedIds.has(item.id) || eventRepairIds.has(item.id) || changedAfterSync.has(item.id))
+    && item.dueAtLocal && item.syncState !== "stale"
+    && (dailySyncDue || item.identityRepairPending || eventRepairIds.has(item.id) || changedAfterSync.has(item.id) || isCurrentAssignment(item)));
   if (eligible.length) {
     debugLog(dailySyncDue ? "Running daily Calendar synchronization" : "Automatically synchronizing Calendar assignments", { count: eligible.length });
     await setSyncStatus({ state: "syncing", current: "Synchronizing Google Calendar…", found: assignments.length });
@@ -414,9 +564,29 @@ PrairieRunExt.addRuntimeMessageListener((message, sender, sendResponse) => {
     PrairieRunCalendar.getAuthStatus().then((status) => sendResponse({ ok: true, status })).catch((error) => sendResponse({ ok: false, error: error?.message || "Could not read sign-in status." }));
     return true;
   }
+  if (message?.type === "PRAIRIERUN_SYNC_GOOGLE_CALENDAR") {
+    syncGoogleCalendarFromStore(message.reason || "manual-google").then((result) => sendResponse({ ok: true, result })).catch((error) => sendResponse({ ok: false, error: error?.message || "Google Calendar sync failed." }));
+    return true;
+  }
+  if (message?.type === "PRAIRIERUN_LAUNCH_WEB_AUTH_FLOW") {
+    PrairieRunExt.identityLaunchWebAuthFlow(message.details || {})
+      .then((responseUrl) => sendResponse({ ok: true, responseUrl }))
+      .catch((error) => sendResponse({ ok: false, error: error?.message || "Web authentication flow failed." }));
+    return true;
+  }
   if (message?.type === "PRAIRIERUN_AUTH_CONNECT") {
     debugLog("Google Calendar connect requested");
-    PrairieRunCalendar.connectGoogleCalendar().then((status) => sendResponse({ ok: true, status })).catch((error) => sendResponse({ ok: false, error: error?.message || "Google sign-in failed.", code: error?.code }));
+    PrairieRunCalendar.connectGoogleCalendar()
+      .then(async (status) => {
+        sendResponse({ ok: true, status });
+        try { await syncGoogleCalendarFromStore("auth-connect"); } catch (error) { debugLog("Google Calendar sync after connect failed", { error: error?.message || String(error) }); }
+      })
+      .catch((error) => sendResponse({
+        ok: false,
+        error: error?.message || "Google sign-in failed.",
+        code: error?.code,
+        redirectUri: error?.redirectUri || PrairieRunCalendar.getRedirectUri?.() || "",
+      }));
     return true;
   }
   if (message?.type === "PRAIRIERUN_AUTH_DISCONNECT") {
@@ -486,36 +656,12 @@ async function findPrairieLearnHomeTab() {
   return tabs.find((tab) => !/\/pl\/course_instance\/\d+/.test(tab.url || "")) || null;
 }
 
-async function resyncStoredAssignments() {
-  if (!DIRECT_GOOGLE_SYNC_ENABLED) return;
-  const stored = await PrairieRunExt.storageLocalGet(ASSIGNMENTS_KEY);
-  const assignments = (stored[ASSIGNMENTS_KEY] || []).filter((item) => item.dueAtLocal && item.syncState !== "stale");
-  if (!assignments.length) return;
-  debugLog("Resynchronizing Calendar assignments after reminder setting change", { count: assignments.length });
-  let results;
+async function resyncStoredAssignments(reason = "settings-change") {
   try {
-    results = await PrairieRunCalendar.exportAssignments(assignments);
+    await syncGoogleCalendarFromStore(reason);
   } catch (error) {
-    if (isAuthRequiredError(error)) {
-      debugLog("Calendar resync needs sign-in", { error: error.message });
-      await setSyncStatus(authRequiredStatus());
-      return;
-    }
-    throw error;
+    debugLog("Could not resynchronize Google Calendar from store", { reason, error: error?.message || String(error) });
   }
-  applyExportResults(results, assignments);
-  const current = stored[ASSIGNMENTS_KEY] || [];
-  applyExportResults(results, current);
-  const failed = results.filter((result) => result.status === "failed");
-  const updates = { [ASSIGNMENTS_KEY]: current };
-  if (!failed.length) {
-    updates[DAILY_CALENDAR_SYNC_KEY] = Date.now();
-    updates[CALENDAR_REPAIR_VERSION_KEY] = CALENDAR_REPAIR_VERSION;
-  }
-  await PrairieRunExt.storageLocalSet(updates);
-  if (failed.length) await setSyncStatus({ state: "error", current: `${failed.length} Calendar assignment(s) could not sync: ${failed[0].reason}` });
-  const tabs = await PrairieRunExt.tabsQuery({ url: "https://us.prairielearn.com/*" });
-  await Promise.all(tabs.filter((tab) => tab.id).map((tab) => sendHomeUpdate(tab.id, current, results)));
 }
 
 async function runDailyCalendarSync() {
@@ -523,15 +669,12 @@ async function runDailyCalendarSync() {
   if (dailySyncInFlight) return;
   dailySyncInFlight = true;
   try {
-    const stored = await PrairieRunExt.storageLocalGet(ASSIGNMENTS_KEY);
-    const assignments = (stored[ASSIGNMENTS_KEY] || []).filter((item) => item.dueAtLocal && item.syncState !== "stale");
-    if (!assignments.length) return;
-    debugLog("Running scheduled daily Calendar synchronization", { count: assignments.length });
-    await resyncStoredAssignments();
+    debugLog("Running scheduled daily Calendar synchronization");
+    await syncGoogleCalendarFromStore("daily-alarm");
   } catch (error) {
-    debugLog("Scheduled daily Calendar synchronization failed", { error: error.message });
+    debugLog("Scheduled daily Calendar synchronization failed", { error: error?.message || String(error) });
     if (isAuthRequiredError(error)) await setSyncStatus(authRequiredStatus());
-    else await setSyncStatus({ state: "error", current: error.message });
+    else await setSyncStatus({ state: "error", current: error?.message || String(error), source: "google" });
   } finally {
     dailySyncInFlight = false;
   }
@@ -541,6 +684,7 @@ if (typeof globalThis !== "undefined") {
   globalThis.PrairieRunBackground = globalThis.PrairieRunBackground || {};
   globalThis.PrairieRunBackground.runDailyCalendarSync = runDailyCalendarSync;
   globalThis.PrairieRunBackground.resyncStoredAssignments = resyncStoredAssignments;
+  globalThis.PrairieRunBackground.syncGoogleCalendarFromStore = syncGoogleCalendarFromStore;
   globalThis.PrairieRunBackground.notifyHomeTab = typeof notifyHomeTab !== "undefined" ? notifyHomeTab : undefined;
 }
 
@@ -566,6 +710,13 @@ async function runBackgroundSync(reason, sources) {
   try {
     const summary = await globalThis.PrairieRunOrchestrator.runSync({ reason, sources });
     debugLog("Background sync finished", { reason, skipped: summary?.skipped || null });
+    if (!summary?.skipped) {
+      try {
+        await syncGoogleCalendarFromStore(reason || "background-sync");
+      } catch (error) {
+        debugLog("Google Calendar sync after background sync failed", { reason, error: error?.message || String(error) });
+      }
+    }
     return { ok: true, summary };
   } catch (error) {
     debugLog("Background sync failed", { reason, error: error.message });
@@ -622,7 +773,10 @@ PrairieRunExt.addAlarmsListener?.((alarm) => {
 
 // The toolbar button opens the full PrairieRun page; there is no popup.
 PrairieRunExt.addActionClickedListener?.(() => {
-  PrairieRunExt.tabsCreateForeground("options.html").catch((error) => debugLog("Could not open the PrairieRun page", { error: error.message }));
+  const open = typeof PrairieRunExt.openOptionsPage === "function"
+    ? PrairieRunExt.openOptionsPage()
+    : PrairieRunExt.tabsCreateForeground("options.html");
+  open.catch((error) => debugLog("Could not open the PrairieRun page", { error: error.message }));
 });
 PrairieRunExt.alarmsCreate?.(DAILY_CALENDAR_SYNC_ALARM, { delayInMinutes: 24 * 60, periodInMinutes: 24 * 60 }).catch((error) => debugLog("Could not schedule daily Calendar synchronization", { error: error.message }));
 ensureBackgroundSyncAlarm().catch((error) => debugLog("Could not schedule background synchronization", { error: error.message }));

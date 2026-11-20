@@ -96,9 +96,12 @@
 
     const previous = await readState();
     const currentHash = simpleHash(text);
-    if (previous?.hash && previous.hash === currentHash && previous.url) {
+    // Only reuse a stored URL for the SAME feed id: a signed-in account can
+    // switch the local feed (sign-in migration, second device), and the old
+    // blob URL must never stand in for the new feed.
+    if (previous?.hash && previous.hash === currentHash && previous.url && previous.feedId === config.feedId) {
       const publishedAt = previous.publishedAt || new Date().toISOString();
-      await writeState({ state: "ok", url: previous.url, hash: currentHash, publishedAt });
+      await writeState({ state: "ok", feedId: config.feedId, url: previous.url, hash: currentHash, publishedAt });
       return { ok: true, url: previous.url, unchanged: true, publishedAt };
     }
 
@@ -114,7 +117,7 @@
       });
     } catch (error) {
       const message = originOf(config.relayUrl)
-        ? `Could not reach the feed relay (${originOf(config.relayUrl)}). Grant the relay access in the Calendar feed card or publish again.`
+        ? `Could not reach the feed relay (${originOf(config.relayUrl)}). Grant the relay access in the Calendar card or publish again.`
         : "Feed relay URL is invalid.";
       await writeState({ state: "error", error: message });
       return { ok: false, status: "error", error: message };
@@ -123,7 +126,7 @@
       const code = response.status;
       const body = await response.text().catch(() => "");
       const message = code === 401
-        ? "The feed relay rejected the publish key. Re-check it in the Calendar feed card."
+        ? "Could not update the calendar feed. Tap Copy feed URL to try again."
         : `Feed publish failed (${code}).${body ? ` ${sliceForDisplay(body)}` : ""}`;
       await writeState({ state: "error", error: message });
       return { ok: false, status: "error", error: message };
@@ -140,7 +143,7 @@
     }
     const publishedAt = new Date().toISOString();
     const result = { ok: true, url, status: "ok", publishedAt };
-    await writeState({ state: "ok", url, hash: currentHash, publishedAt, error: null });
+    await writeState({ state: "ok", feedId: config.feedId, url, hash: currentHash, publishedAt, error: null });
     return result;
   }
 
@@ -275,10 +278,22 @@
         allowed = true;
       }
       if (!allowed) {
+        // Keep a prior blob .ics URL; clear a mistaken relay-origin URL so Copy
+        // never shows https://prairierun-feed.vercel.app as the subscription.
+        const previous = await readState();
+        const priorUrl = String(previous?.url || "").trim();
+        // A recorded feed id that differs means this URL belongs to another
+        // feed (sign-in migration), so it must not be shown for this one.
+        const sameFeed = !previous?.feedId || previous.feedId === config.feedId;
+        const keepUrl = sameFeed && (/\.ics(?:$|\?)/i.test(priorUrl) || /blob\.vercel-storage\.com\/feeds\//i.test(priorUrl))
+          ? priorUrl
+          : "";
         await writeState({
           state: "needs_permission",
-          url: config.relayUrl,
-          error: "Grant the Calendar feed relay access so background syncs can publish.",
+          url: keepUrl,
+          // Empty: the dashboard publishes via CORS without host permission.
+          // Do not surface extension-permission jargon to end users.
+          error: "",
         });
         return { skipped: "needs_permission" };
       }
@@ -302,13 +317,13 @@
     try {
       response = await fetch(`${base}/api/claim`);
     } catch {
-      return fail("Could not reach the PrairieRun feed relay; try again or set a custom relay below.");
+      return fail("Could not create a feed right now. Try again in a minute.");
     }
     if (!response.ok) {
       const code = response.status;
       return fail(code === 429
-        ? "The feed relay is rate-limiting new feeds right now; try again in a minute."
-        : `Could not create a new feed (${code}). Try again or set a custom relay below.`);
+        ? "New feeds are rate-limited right now. Try again in a minute."
+        : `Could not create a feed (${code}). Try again in a minute.`);
     }
     let data = null;
     try {

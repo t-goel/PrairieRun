@@ -86,6 +86,32 @@ test("toLegacy round-trips the deadline item", () => {
   assert.equal(again.title, item.title);
 });
 
+test("durationMinutes defaults to 15 and round-trips through legacy assignments", () => {
+  const item = model.makeDeadlineItem({ id: "pl:9:assessment:9", source: "gradescope", title: "HW", url: "https://e.com", durationMinutes: 30 });
+  assert.equal(item.durationMinutes, 30);
+  const itemDefault = model.makeDeadlineItem({ id: "pl:9:assessment:10", source: "gradescope", title: "HW", url: "https://e.com" });
+  assert.equal(itemDefault.durationMinutes, 15);
+  const legacy = model.toLegacyPlAssignment(item, {});
+  assert.equal(legacy.durationMinutes, 30);
+  const legacyDefault = model.toLegacyPlAssignment(itemDefault, {});
+  assert.equal(legacyDefault.durationMinutes, 15);
+});
+
+test("toLegacyPlAssignment preserves exam startAt/endAt", () => {
+  const exam = model.makeDeadlineItem({
+    id: "pl:9:assessment:11",
+    source: "prairielearn",
+    title: "Exam",
+    url: "https://e.com",
+    dueAt: "2026-11-20T19:30:00.000Z",
+    startAt: "2026-11-20T18:00:00.000Z",
+    endAt: "2026-11-20T19:30:00.000Z",
+  });
+  const legacy = model.toLegacyPlAssignment(exam, {});
+  assert.equal(legacy.startAt, "2026-11-20T18:00:00.000Z");
+  assert.equal(legacy.endAt, "2026-11-20T19:30:00.000Z");
+});
+
 test("fingerprint does not depend on key order", () => {
   const base = {
     id: "x",

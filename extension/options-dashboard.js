@@ -1,7 +1,8 @@
 // PrairieRun dashboard controller: drives the full-page options.html surface
-// (settings, Google Calendar auth, source status, Sync now). Lives on the
-// same message contract as the removed popup (PRAIRIERUN_GET_STATE /
-// PRAIRIERUN_AUTH_* / PRAIRIERUN_SYNC_NOW).
+// (settings, Google sign-in controls mounted in the unified Calendar card,
+// source status, Sync now). The feed copy/link controls live in
+// options-feed.js. Lives on the same message contract as the removed popup
+// (PRAIRIERUN_GET_STATE / PRAIRIERUN_AUTH_* / PRAIRIERUN_SYNC_NOW).
 const notificationLeadElement = typeof document !== "undefined" ? document.querySelector("#notification-lead-hours") : null;
 const completionThresholdElement = typeof document !== "undefined" ? document.querySelector("#completion-threshold") : null;
 const authStatusElement = typeof document !== "undefined" ? document.querySelector("#auth-status") : null;
@@ -23,12 +24,9 @@ let cachedSourceStatus = {};
 function showStatus(text, error = false) {
   showSyncStatus(text, error);
 }
-// Direct Google sync is optional (the Calendar feed card works without it).
-// Firefox-only OAuth-client errors and setup notices are suppressed from the
-// main Sources card status line.
+// Firefox-only client-ID setup noise stays off the Sources status line.
 function isSuppressedSyncMessage(text) {
-  // Direct Google sync UI is hidden; suppress OAuth/client and leftover Connect prompts.
-  return /googleClientId|Firefox needs its own Google OAuth client|Google direct sync needs the Firefox client ID|Connect Google Calendar|Synchronizing Google Calendar|Checking Google Calendar|Google Calendar synced|Google Calendar checked/i.test(text || "");
+  return /googleClientId|Firefox needs its own Google OAuth client|Google direct sync needs the Firefox client ID/i.test(text || "");
 }
 function friendlySyncMessage(text) {
   if (isSuppressedSyncMessage(text)) return "";
@@ -42,6 +40,7 @@ function showSyncStatus(text, error = false) {
 }
 function applySettings(nextSettings = {}) {
   settings = { ...settings, ...nextSettings };
+  if (settings.googleCalendarLayout !== "single") settings.googleCalendarLayout = "per_course";
   const minutes = Number(settings.notificationLeadMinutes);
   if (notificationLeadElement) notificationLeadElement.value = Number.isFinite(minutes) ? String(minutes / 60) : "4";
   if (completionThresholdElement) completionThresholdElement.value = Number.isFinite(Number(settings.completionThreshold)) ? String(settings.completionThreshold) : "95";
@@ -72,8 +71,7 @@ function refreshState() {
       const msg = friendlySyncMessage(raw || "Synchronizing…");
       showStatus(msg);
     } else if (response.sync?.state === "auth_required") {
-      // Direct Google sync is hidden; do not nudge Connect.
-      showStatus("");
+      showStatus(friendlySyncMessage(raw || "Sign in with Google to sync.") || "Sign in with Google to sync.");
     } else if (response.sync?.state === "error") {
       showStatus(raw || "Sync failed.", true);
     } else {
@@ -91,6 +89,20 @@ function refreshAuthStatus() {
     showAuthError(error.message, false);
   });
 }
+function calendarLayoutRow() {
+  return typeof document !== "undefined" ? document.getElementById("google-calendar-layout") : null;
+}
+
+function applyCalendarLayoutUi(connected) {
+  const row = calendarLayoutRow();
+  if (!row) return;
+  row.hidden = !connected;
+  const mode = settings.googleCalendarLayout === "single" ? "single" : "per_course";
+  for (const input of row.querySelectorAll('input[name="google-calendar-layout"]')) {
+    input.checked = input.value === mode;
+  }
+}
+
 function renderAuthStatus(status = {}) {
   if (!authStatusElement) return;
   authRedirectUri = status.redirectUri || "";
@@ -99,21 +111,23 @@ function renderAuthStatus(status = {}) {
     authStatusElement.textContent = "Not connected.";
     if (authConnectButton) authConnectButton.hidden = true;
     if (authDisconnectButton) authDisconnectButton.hidden = true;
-    // The direct-sync OAuth client is intentionally device-specific setup;
-    // the Calendar feed card is the no-config path, so point there.
-    showAuthError("Direct Google sync is not set up on this device. Use the Calendar feed card above — it needs no setup.", true);
+    applyCalendarLayoutUi(false);
+    showAuthError("Google Calendar sign-in is not available in this build.", true);
     return;
   }
   if (status.connected) {
     const expiry = status.expiresAt ? `, expires ${new Date(status.expiresAt).toLocaleString()}` : "";
-    authStatusElement.textContent = `Connected${expiry}.`;
+    authStatusElement.textContent = `Signed in${expiry}.`;
     if (authConnectButton) authConnectButton.hidden = true;
     if (authDisconnectButton) authDisconnectButton.hidden = false;
+    applyCalendarLayoutUi(true);
     showAuthError("", false);
   } else {
     authStatusElement.textContent = "Not connected.";
     if (authConnectButton) authConnectButton.hidden = false;
     if (authDisconnectButton) authDisconnectButton.hidden = true;
+    applyCalendarLayoutUi(false);
+    showAuthError("", false);
   }
 }
 function showAuthError(text, isError) {
@@ -373,7 +387,20 @@ function monitorRefresh(attempt = 0) {
 
 if (typeof document !== "undefined") {
   refreshState();
-  // Direct Google sync card is hidden; skip auth status polling.
+  refreshAuthStatus();
+}
+
+const layoutRow = calendarLayoutRow();
+if (layoutRow) {
+  layoutRow.addEventListener("change", async (event) => {
+    const input = event.target;
+    if (!input || input.name !== "google-calendar-layout") return;
+    const value = input.value === "single" ? "single" : "per_course";
+    settings.googleCalendarLayout = value;
+    await saveSettings();
+    showStatus(value === "single" ? "Using one PrairieRun calendar. Syncing…" : "Using one calendar per course. Syncing…");
+    runManualSync();
+  });
 }
 
 if (typeof PrairieRunExt !== "undefined" && typeof PrairieRunExt.addStorageChangedListener === "function") {
@@ -421,14 +448,45 @@ if (authConnectButton) authConnectButton.addEventListener("click", () => {
     authConnectButton.disabled = false;
     if (!response?.ok) {
       const cancelled = response?.code === "cancelled" || /cancel/i.test(response?.error || "");
+      const mismatch = /redirect_uri_mismatch|redirect_mismatch|Helium|OAuth redirect/i.test(
+        `${response?.error || ""} ${response?.code || ""}`,
+      );
       if (authStatusElement) authStatusElement.textContent = "Not connected.";
-      showAuthError(response?.error || "Google sign-in failed.", !cancelled);
+      applyCalendarLayoutUi(false);
+      if (response?.redirectUri) authRedirectUri = response.redirectUri;
+      else if (response?.status?.redirectUri) authRedirectUri = response.status.redirectUri;
+      if (authRedirectElement) authRedirectElement.textContent = authRedirectUri || "";
+      // Helium needs the exact redirect string registered on a Web OAuth client.
+      if (mismatch && authRedirectUri) {
+        if (authRedirectElement) authRedirectElement.hidden = false;
+        if (authCopyButton) authCopyButton.hidden = false;
+      }
+      const busy = response?.code === "auth_busy" || /only one web auth flow/i.test(response?.error || "");
+      showAuthError(
+        busy
+          ? "Another Google sign-in is already open. Close that window, wait a second, then try again."
+          : (response?.error || "Google sign-in failed."),
+        !cancelled,
+      );
       return;
     }
+    if (authRedirectElement) authRedirectElement.hidden = true;
+    if (authCopyButton) authCopyButton.hidden = true;
     renderAuthStatus(response.status);
+    showStatus("Syncing Google Calendar…");
+    runManualSync();
   }).catch((error) => {
     authConnectButton.disabled = false;
     if (authStatusElement) authStatusElement.textContent = "Not connected.";
+    applyCalendarLayoutUi(false);
+    if (error?.redirectUri) {
+      authRedirectUri = error.redirectUri;
+      if (authRedirectElement) {
+        authRedirectElement.textContent = authRedirectUri;
+        authRedirectElement.hidden = false;
+      }
+      if (authCopyButton) authCopyButton.hidden = false;
+    }
     showAuthError(error.message, true);
   });
 });
