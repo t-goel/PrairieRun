@@ -133,14 +133,47 @@
     return item?.courseKey || item?.courseInstanceId || item?.courseName || "Unknown class";
   }
 
-  function itemCourseCode(item) {
-    if (item?.courseCode) return String(item.courseCode);
-    try {
-      const derived = globalThis.PrairieRunModel?.courseCodeFromName?.(item?.courseName || "");
-      if (derived) return String(derived);
-    } catch {
-      // Fall through to null when the model is unavailable.
+  const TERM_WORDS = new Set(["FA", "FALL", "SP", "SPRING", "SU", "SUMMER", "WI", "WIN", "WINTER", "AU", "AUTUMN"]);
+  const CODE_RE = /\b([A-Za-z]{2,4})\s*[-_]?\s*(\d{3}[A-Za-z0-9]{0,3})\b/g;
+
+  function extractCourseCode(text) {
+    if (!text) return null;
+    for (const match of String(text).matchAll(CODE_RE)) {
+      const subj = match[1].toUpperCase();
+      const num = match[2].toUpperCase();
+      if (TERM_WORDS.has(subj) && /^20\d{2}$|^\d{2}$/.test(num)) continue;
+      return `${subj} ${num}`;
     }
+    return null;
+  }
+
+  function itemCourseCode(item, courseLinks = null) {
+    if (courseLinks && typeof courseLinks === "object") {
+      const source = item?.source;
+      const key = item?.courseKey;
+      const url = item?.url || item?.sourceUrl;
+      for (const [code, entry] of Object.entries(courseLinks)) {
+        if (!entry || typeof entry !== "object") continue;
+        const keys = entry[source];
+        if (Array.isArray(keys)) {
+          if ((key && keys.includes(key)) || (url && keys.includes(url))) {
+            const clean = extractCourseCode(code) || code;
+            if (clean) return clean;
+          }
+        }
+      }
+    }
+    const fromCode = extractCourseCode(item?.courseCode);
+    if (fromCode) return fromCode;
+    const fromName = extractCourseCode(item?.courseName);
+    if (fromName) return fromName;
+    const fromKey = extractCourseCode(item?.courseKey);
+    if (fromKey) return fromKey;
+    const fromUrl = extractCourseCode(item?.url || item?.sourceUrl);
+    if (fromUrl) return fromUrl;
+    const fromTitle = extractCourseCode(item?.title);
+    if (fromTitle) return fromTitle;
+    if (item?.courseCode) return String(item.courseCode);
     return null;
   }
 
@@ -154,7 +187,7 @@
     return !item?.source || item.source === "prairielearn";
   }
 
-  const api = { dueDateKey, formatDueDate, formatItemDue, isCurrent, isCompleted, displayable, compareAssignments, statusLabel, sourceBadge, itemUrl, itemCourseKey, itemCourseName, canEditDate };
+  const api = { dueDateKey, formatDueDate, formatItemDue, isCurrent, isCompleted, displayable, compareAssignments, statusLabel, sourceBadge, itemUrl, itemCourseKey, itemCourseName, itemCourseCode, extractCourseCode, canEditDate };
   globalThis.PrairieRunView = api;
   if (typeof module !== "undefined") module.exports = api;
 })();

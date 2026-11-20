@@ -492,21 +492,41 @@ button.source-action { width: 100%; padding: 6px 10px; font-size: 11px; margin-t
   font-weight: 800;
   color: var(--ok);
   text-decoration: none;
+  white-space: nowrap;
 }
 .prr-course-link:hover { text-decoration: underline; }
 .prr-course-link__check { color: var(--ok); font-weight: 900; }
 .prr-course-link--nolink { color: #666; cursor: default; }
 .prr-course-link--nolink .prr-course-link__check { color: #666; }
 
-/* Course links: bigger first ("Course") and last ("Website") columns, and
-   the link text never wraps. */
-#course-links table { width: 100%; table-layout: fixed; }
+/* Course links table */
+#course-links {
+  overflow-x: auto;
+}
+#course-links table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+}
 #course-links table th,
-#course-links table td { white-space: nowrap; }
+#course-links table td {
+  padding: 6px 6px;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+#course-links table th {
+  font-size: 9.5px;
+  letter-spacing: .02em;
+}
 #course-links table th:first-child,
-#course-links table td:first-child { width: 34%; }
-#course-links table th:last-child,
-#course-links table td:last-child { width: 26%; }
+#course-links table td:first-child {
+  text-align: left;
+  padding-left: 2px;
+}
+#course-links table th:not(:first-child),
+#course-links table td:not(:first-child) {
+  text-align: center;
+}
 .card ul,
 .card ol {
   margin: 8px 0 0;
@@ -533,9 +553,9 @@ button.source-action { width: 100%; padding: 6px 10px; font-size: 11px; margin-t
 .prr-digest-list[data-prr-digest] { min-width: 0; }
 .prr-digest-row {
   display: grid;
-  grid-template-columns: minmax(0, 2.5em) minmax(4em, 5em) minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: baseline;
+  grid-template-columns: max-content max-content minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
   padding: 10px 0;
   border-top: 2px solid var(--ink);
   min-width: 0;
@@ -551,11 +571,13 @@ button.source-action { width: 100%; padding: 6px 10px; font-size: 11px; margin-t
   background: var(--wash);
   text-align: center;
   white-space: nowrap;
+  display: inline-block;
+  line-height: 1.2;
 }
 .prr-digest-course {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
   min-width: 0;
 }
 .prr-digest-title {
@@ -577,15 +599,16 @@ span.prr-digest-title { text-decoration: none; }
 }
 @media (max-width: 760px) {
   .prr-digest-row {
-    grid-template-columns: 3.2em minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr);
     grid-template-areas:
-      "badge course"
-      "badge title"
-      "badge due";
+      "badge due"
+      "course title";
+    gap: 6px 10px;
+    align-items: baseline;
   }
-  .prr-digest-badge { grid-area: badge; }
+  .prr-digest-badge { grid-area: badge; justify-self: start; }
   .prr-digest-course { grid-area: course; }
   .prr-digest-title { grid-area: title; }
-  .prr-digest-due { grid-area: due; justify-self: start; white-space: normal; }
+  .prr-digest-due { grid-area: due; justify-self: end; white-space: nowrap; }
 }
 

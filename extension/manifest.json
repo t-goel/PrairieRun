@@ -3,6 +3,7 @@
   "name": "PrairieRun",
   "version": "0.1.0",
   "description": "Scan PrairieLearn assignments and stage them for Google Calendar.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxxY+2JHWnTZNOHl/4D9/OUIvhm7zYAc0M4k5j5I7YqjFV2s/2lLY6C+lDFjrK7S+MBLckYk6/8rkxu+T4E2oEo0Jkn9rpaO+RBV1rD7tQXFUEtdHnocTFnmWa8gwbMcSQUFwPLFsUh9kWhEUwZUtKkRpBijU6WQB5/o8pi8+EDVuB4Pu+fcWN3yHkiiJrHSG6Zz1RXkUHDjYxW9GjepPKUa2Vxr4sRtMmthsceF8cNPyZ3tjc58M9D9MuIqyatc6c/55zJxrfNiycsraKoU9dQF4N0U1wrAkDMM9kZ46QjBeLeoCNZB2rcTx2DHh8gkihLnJ9vqSha5xhZKM6N1BPQIDAQAB",
   "action": {
     "default_title": "Open PrairieRun"
   },
@@ -28,7 +29,10 @@
   },
   "host_permissions": [
     "https://us.prairielearn.com/*",
-    "https://www.googleapis.com/*"
+    "https://www.googleapis.com/*",
+    "https://prairierun-feed.vercel.app/*",
+    "https://*.convex.cloud/*",
+    "https://*.convex.site/*"
   ],
   "content_scripts": [
     {

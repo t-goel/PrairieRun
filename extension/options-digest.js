@@ -2,6 +2,7 @@
 (function () {
   const DEADLINES_KEY = "prairierunDeadlines";
   const ASSIGNMENTS_KEY = "prairierunAssignments";
+  const LINKS_KEY = "prairierunCourseLinks";
   const DEFAULT_LIMIT = 12;
   const DEFAULT_WINDOW_DAYS = 14;
 
@@ -50,12 +51,18 @@
     return item?.url || item?.sourceUrl || "";
   }
 
-  function courseLabel(item) {
+  function courseLabel(item, links = null) {
     const api = view();
     if (api && typeof api.itemCourseCode === "function") {
-      const code = api.itemCourseCode(item);
+      const code = api.itemCourseCode(item, links);
       if (code) return code;
     }
+    const extract = api?.extractCourseCode || ((text) => {
+      const match = String(text || "").match(/\b([A-Za-z]{2,4})\s*[-_]?\s*(\d{3}[A-Za-z0-9]{0,3})\b/);
+      return match ? `${match[1].toUpperCase()} ${match[2].toUpperCase()}` : null;
+    });
+    const code = extract(item?.courseCode) || extract(item?.courseName) || extract(item?.courseKey) || extract(item?.url || item?.sourceUrl);
+    if (code) return code;
     if (api && typeof api.itemCourseName === "function") {
       const name = api.itemCourseName(item);
       if (name) return name;
@@ -111,10 +118,10 @@
     return node;
   }
 
-  function renderRow(item) {
+  function renderRow(item, links = null) {
     const row = make("li", { className: "prr-digest-row" });
     row.append(make("span", { className: "prr-digest-badge" }, sourceBadge(item)));
-    const course = courseLabel(item);
+    const course = courseLabel(item, links);
     if (course) row.append(make("span", { className: "prr-digest-course" }, course));
     const href = itemUrl(item);
     const title = String(item.title || "Untitled");
@@ -133,11 +140,13 @@
     return row;
   }
 
-  async function loadItems() {
-    const stored = await globalThis.PrairieRunExt.storageLocalGet([DEADLINES_KEY, ASSIGNMENTS_KEY]);
-    if (Array.isArray(stored[DEADLINES_KEY])) return stored[DEADLINES_KEY];
-    if (Array.isArray(stored[ASSIGNMENTS_KEY])) return stored[ASSIGNMENTS_KEY];
-    return [];
+  async function loadData() {
+    const stored = await globalThis.PrairieRunExt.storageLocalGet([DEADLINES_KEY, ASSIGNMENTS_KEY, LINKS_KEY]);
+    let items = [];
+    if (Array.isArray(stored[DEADLINES_KEY])) items = stored[DEADLINES_KEY];
+    else if (Array.isArray(stored[ASSIGNMENTS_KEY])) items = stored[ASSIGNMENTS_KEY];
+    const links = stored[LINKS_KEY] && typeof stored[LINKS_KEY] === "object" ? stored[LINKS_KEY] : {};
+    return { items, links };
   }
 
   async function render(section) {
@@ -151,8 +160,11 @@
     async function refresh() {
       root.textContent = "";
       let items = [];
+      let links = {};
       try {
-        items = await loadItems();
+        const data = await loadData();
+        items = data.items;
+        links = data.links;
       } catch (error) {
         root.append(make("p", { className: "muted" }, error?.message || "Could not load digest."));
         return;
@@ -163,7 +175,7 @@
         return;
       }
       const list = make("ul", { className: "prr-digest-list" });
-      for (const item of selected) list.append(renderRow(item));
+      for (const item of selected) list.append(renderRow(item, links));
       root.append(list);
     }
 
@@ -171,7 +183,7 @@
     try {
       globalThis.PrairieRunExt?.storageOnChanged?.((changes, area) => {
         if (area && area !== "local") return;
-        if (changes[DEADLINES_KEY] || changes[ASSIGNMENTS_KEY]) refresh();
+        if (changes[DEADLINES_KEY] || changes[ASSIGNMENTS_KEY] || changes[LINKS_KEY]) refresh();
       });
     } catch { /* ignore */ }
   }
@@ -183,7 +195,7 @@
     });
   }
 
-  const api = { selectDigestItems, dueMs, render };
+  const api = { selectDigestItems, dueMs, courseLabel, renderRow, render };
   globalThis.PrairieRunOptionsDigest = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })();
