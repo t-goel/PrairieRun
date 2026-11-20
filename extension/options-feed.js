@@ -215,9 +215,7 @@
     const urlRow = make("div", { className: "auth-redirect-row prr-feed-url-row", hidden: "hidden" });
     const urlLabel = make("span", { className: "prr-feed-url-label", hidden: "hidden" }, "All courses");
     const urlCode = make("code", {});
-    const copyButton = make("button", { className: "secondary", type: "button" }, "Copy feed URL");
-    wireCopyButton(copyButton, () => urlCode.textContent || "");
-    urlRow.append(urlLabel, urlCode, copyButton);
+    urlRow.append(urlLabel, urlCode);
 
     const courseFeedsList = make("div", {
       className: "prr-course-feeds",
@@ -413,7 +411,8 @@
       if (showError) {
         statusLine.textContent = state.error;
       } else {
-        statusLine.textContent = "Feed ready";
+        // Success is visible via the Copy feed URL action; no extra text.
+        statusLine.textContent = "";
       }
     }
 
