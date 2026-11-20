@@ -1,0 +1,189 @@
+// Dashboard Digest: upcoming deadlines across all sources, with direct links.
+(function () {
+  const DEADLINES_KEY = "prairierunDeadlines";
+  const ASSIGNMENTS_KEY = "prairierunAssignments";
+  const DEFAULT_LIMIT = 12;
+  const DEFAULT_WINDOW_DAYS = 14;
+
+  const SOURCE_BADGE = {
+    prairielearn: "PrairieLearn",
+    gradescope: "Gradescope",
+    canvas: "Canvas",
+    prairietest: "PrairieTest",
+    courseweb: "Course Website",
+    manual: "Manual",
+  };
+
+  function view() {
+    return globalThis.PrairieRunView || null;
+  }
+
+  function dueMs(item) {
+    if (item?.dueAt) {
+      const t = Date.parse(item.dueAt);
+      return Number.isFinite(t) ? t : null;
+    }
+    const local = String(item?.dueAtLocal || "");
+    const match = local.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})/);
+    if (!match) return null;
+    try {
+      const iso = globalThis.PrairieRunModel?.localToUtc?.(`${match[1]} ${match[2]}:${match[3]}:00`, "America/Chicago");
+      const t = Date.parse(iso || "");
+      return Number.isFinite(t) ? t : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function isCompleted(item) {
+    const api = view();
+    if (api && typeof api.isCompleted === "function") return api.isCompleted(item);
+    const status = item?.completionStatus ?? item?.status ?? "unknown";
+    if (status === "completed") return true;
+    const score = Number(item?.score);
+    return Number.isFinite(score) && score > 95;
+  }
+
+  function itemUrl(item) {
+    const api = view();
+    if (api && typeof api.itemUrl === "function") return api.itemUrl(item) || "";
+    return item?.url || item?.sourceUrl || "";
+  }
+
+  function courseLabel(item) {
+    const api = view();
+    if (api && typeof api.itemCourseCode === "function") {
+      const code = api.itemCourseCode(item);
+      if (code) return code;
+    }
+    if (api && typeof api.itemCourseName === "function") {
+      const name = api.itemCourseName(item);
+      if (name) return name;
+    }
+    return item?.courseCode || item?.courseName || item?.courseKey || "";
+  }
+
+  function formatDue(item) {
+    const api = view();
+    if (api && typeof api.formatItemDue === "function") return api.formatItemDue(item);
+    return item?.dueAt || item?.dueAtLocal || "";
+  }
+
+  function sourceBadge(item) {
+    const api = view();
+    if (api && typeof api.sourceBadge === "function") {
+      const badge = api.sourceBadge(item);
+      if (badge) return badge;
+    }
+    return SOURCE_BADGE[item?.source] || String(item?.source || "?").slice(0, 3).toUpperCase();
+  }
+
+  // Pure helper: next dated, incomplete items within the window, capped.
+  function selectDigestItems(items, { now = new Date(), limit = DEFAULT_LIMIT, windowDays = DEFAULT_WINDOW_DAYS } = {}) {
+    const start = now instanceof Date ? now.getTime() : Date.parse(now);
+    const end = start + Math.max(0, Number(windowDays) || 0) * 24 * 60 * 60 * 1000;
+    const rows = [];
+    for (const item of items || []) {
+      if (!item || isCompleted(item)) continue;
+      const t = dueMs(item);
+      if (t === null) continue;
+      // Include anything due later today through the window; drop fully past.
+      if (t < start - 60 * 60 * 1000) continue;
+      if (Number.isFinite(end) && t > end) continue;
+      rows.push(item);
+    }
+    rows.sort((a, b) => {
+      const da = dueMs(a);
+      const db = dueMs(b);
+      if (da !== db) return da - db;
+      return String(a.title || "").localeCompare(String(b.title || ""));
+    });
+    return rows.slice(0, Math.max(0, Number(limit) || DEFAULT_LIMIT));
+  }
+
+  function make(tag, attrs = {}, text) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(attrs)) {
+      if (key === "className") node.className = value;
+      else if (value != null) node.setAttribute(key, value);
+    }
+    if (text != null) node.textContent = text;
+    return node;
+  }
+
+  function renderRow(item) {
+    const row = make("li", { className: "prr-digest-row" });
+    row.append(make("span", { className: "prr-digest-badge" }, sourceBadge(item)));
+    const course = courseLabel(item);
+    if (course) row.append(make("span", { className: "prr-digest-course" }, course));
+    const href = itemUrl(item);
+    const title = String(item.title || "Untitled");
+    if (href) {
+      const link = make("a", {
+        className: "prr-digest-title",
+        href,
+        target: "_blank",
+        rel: "noreferrer",
+      }, title);
+      row.append(link);
+    } else {
+      row.append(make("span", { className: "prr-digest-title" }, title));
+    }
+    row.append(make("span", { className: "prr-digest-due" }, formatDue(item)));
+    return row;
+  }
+
+  async function loadItems() {
+    const stored = await globalThis.PrairieRunExt.storageLocalGet([DEADLINES_KEY, ASSIGNMENTS_KEY]);
+    if (Array.isArray(stored[DEADLINES_KEY])) return stored[DEADLINES_KEY];
+    if (Array.isArray(stored[ASSIGNMENTS_KEY])) return stored[ASSIGNMENTS_KEY];
+    return [];
+  }
+
+  async function render(section) {
+    if (!section || typeof document === "undefined") return;
+    let root = section.querySelector("[data-prr-digest]");
+    if (!root) {
+      root = make("div", { "data-prr-digest": "1" });
+      section.append(root);
+    }
+
+    async function refresh() {
+      root.textContent = "";
+      let items = [];
+      try {
+        items = await loadItems();
+      } catch (error) {
+        root.append(make("p", { className: "muted" }, error?.message || "Could not load digest."));
+        return;
+      }
+      const selected = selectDigestItems(items);
+      if (!selected.length) {
+        root.append(make("p", { className: "muted" }, "Nothing upcoming."));
+        return;
+      }
+      const list = make("ul", { className: "prr-digest-list" });
+      for (const item of selected) list.append(renderRow(item));
+      root.append(list);
+    }
+
+    await refresh();
+    try {
+      globalThis.PrairieRunExt?.storageOnChanged?.((changes, area) => {
+        if (area && area !== "local") return;
+        if (changes[DEADLINES_KEY] || changes[ASSIGNMENTS_KEY]) refresh();
+      });
+    } catch { /* ignore */ }
+  }
+
+  if (typeof document !== "undefined") {
+    document.addEventListener("DOMContentLoaded", () => {
+      const section = document.getElementById("assignment-digest");
+      if (section) render(section);
+    });
+  }
+
+  const api = { selectDigestItems, dueMs, render };
+  globalThis.PrairieRunOptionsDigest = api;
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+})();

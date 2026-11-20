@@ -112,7 +112,14 @@
             : "Not synced";
   }
 
-  const SOURCE_BADGES = { prairielearn: "PL", gradescope: "GS", canvas: "CV", prairietest: "PT" };
+  const SOURCE_BADGES = {
+    prairielearn: "PrairieLearn",
+    gradescope: "Gradescope",
+    canvas: "Canvas",
+    prairietest: "PrairieTest",
+    courseweb: "Course Website",
+    manual: "Manual",
+  };
 
   function sourceBadge(item) {
     return SOURCE_BADGES[item?.source] || null;
@@ -124,6 +131,17 @@
 
   function itemCourseKey(item) {
     return item?.courseKey || item?.courseInstanceId || item?.courseName || "Unknown class";
+  }
+
+  function itemCourseCode(item) {
+    if (item?.courseCode) return String(item.courseCode);
+    try {
+      const derived = globalThis.PrairieRunModel?.courseCodeFromName?.(item?.courseName || "");
+      if (derived) return String(derived);
+    } catch {
+      // Fall through to null when the model is unavailable.
+    }
+    return null;
   }
 
   function itemCourseName(item) {

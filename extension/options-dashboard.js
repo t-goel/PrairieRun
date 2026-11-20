@@ -108,7 +108,7 @@ function renderAuthStatus(status = {}) {
   authRedirectUri = status.redirectUri || "";
   if (authRedirectElement) authRedirectElement.textContent = authRedirectUri;
   if (!status.clientConfigured) {
-    authStatusElement.textContent = "Not connected.";
+    authStatusElement.textContent = "No Google Calendar integration";
     if (authConnectButton) authConnectButton.hidden = true;
     if (authDisconnectButton) authDisconnectButton.hidden = true;
     applyCalendarLayoutUi(false);
@@ -122,7 +122,7 @@ function renderAuthStatus(status = {}) {
     applyCalendarLayoutUi(true);
     showAuthError("", false);
   } else {
-    authStatusElement.textContent = "Not connected.";
+    authStatusElement.textContent = "No Google Calendar integration";
     if (authConnectButton) authConnectButton.hidden = false;
     if (authDisconnectButton) authDisconnectButton.hidden = true;
     applyCalendarLayoutUi(false);

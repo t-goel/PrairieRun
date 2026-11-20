@@ -208,6 +208,7 @@ button.secondary {
   margin-top: 12px;
 }
 #google-calendar-layout label {
+  flex: 1;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -497,15 +498,15 @@ button.source-action { width: 100%; padding: 6px 10px; font-size: 11px; margin-t
 .prr-course-link--nolink { color: #666; cursor: default; }
 .prr-course-link--nolink .prr-course-link__check { color: #666; }
 
-/* Course links: the table has six columns ending in "Website"; keep the
-   trailing column readable when the table must shrink to the card width. */
-#course-links table { width: max-content; min-width: 0; max-width: 100%; }
+/* Course links: bigger first ("Course") and last ("Website") columns, and
+   the link text never wraps. */
+#course-links table { width: 100%; table-layout: fixed; }
 #course-links table th,
-#course-links table td { min-width: 0; overflow-wrap: anywhere; }
-#course-links table th:last-child { min-width: 72px; }
-#course-links table th:first-child { min-width: 120px; }
-#course-links table th,
-#course-links table td { overflow-wrap: anywhere; }
+#course-links table td { white-space: nowrap; }
+#course-links table th:first-child,
+#course-links table td:first-child { width: 34%; }
+#course-links table th:last-child,
+#course-links table td:last-child { width: 26%; }
 .card ul,
 .card ol {
   margin: 8px 0 0;
@@ -529,9 +530,10 @@ button.source-action { width: 100%; padding: 6px 10px; font-size: 11px; margin-t
   display: grid;
   gap: 0;
 }
+.prr-digest-list[data-prr-digest] { min-width: 0; }
 .prr-digest-row {
   display: grid;
-  grid-template-columns: minmax(7.5em, 10em) minmax(4.5em, 7em) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 2.5em) minmax(4em, 5em) minmax(0, 1fr) auto;
   gap: 10px;
   align-items: baseline;
   padding: 10px 0;
@@ -553,8 +555,6 @@ button.source-action { width: 100%; padding: 6px 10px; font-size: 11px; margin-t
 .prr-digest-course {
   font-size: 11px;
   font-weight: 800;
-  letter-spacing: .04em;
-  text-transform: uppercase;
   overflow-wrap: anywhere;
   min-width: 0;
 }
