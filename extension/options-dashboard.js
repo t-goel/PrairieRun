@@ -8,6 +8,11 @@ const completionThresholdElement = typeof document !== "undefined" ? document.qu
 const authStatusElement = typeof document !== "undefined" ? document.querySelector("#auth-status") : null;
 const authConnectButton = typeof document !== "undefined" ? document.querySelector("#auth-connect") : null;
 const authDisconnectButton = typeof document !== "undefined" ? document.querySelector("#auth-disconnect") : null;
+const authOpenCalendarLink = typeof document !== "undefined" ? document.querySelector("#auth-open-calendar") : null;
+const authSyncButton = typeof document !== "undefined" ? document.querySelector("#auth-sync-calendar") : null;
+const calendarSyncInfo = typeof document !== "undefined" ? document.querySelector("#calendar-sync-info") : null;
+const calendarSyncStatus = typeof document !== "undefined" ? document.querySelector("#calendar-sync-status") : null;
+const calendarSyncDetails = typeof document !== "undefined" ? document.querySelector("#calendar-sync-details") : null;
 const authErrorElement = typeof document !== "undefined" ? document.querySelector("#auth-error") : null;
 const authRedirectElement = typeof document !== "undefined" ? document.querySelector("#auth-redirect") : null;
 const authCopyButton = typeof document !== "undefined" ? document.querySelector("#auth-copy-redirect") : null;
@@ -103,6 +108,101 @@ function applyCalendarLayoutUi(connected) {
   }
 }
 
+function formatShortTime(date) {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  if (diffMs >= 0 && diffMs < 60_000) return "just now";
+  if (diffMs >= 0 && diffMs < 3600_000) {
+    const mins = Math.floor(diffMs / 60_000);
+    return `${mins}m ago`;
+  }
+  const isToday = now.toDateString() === date.toDateString();
+  const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (isToday) return `today at ${time}`;
+  return `${date.toLocaleDateString([], { month: "short", day: "numeric" })} at ${time}`;
+}
+
+async function refreshCalendarSyncStatus(authConnected = true) {
+  if (!calendarSyncInfo) return;
+  if (!authConnected) {
+    calendarSyncInfo.hidden = true;
+    if (authSyncButton) authSyncButton.hidden = true;
+    if (authOpenCalendarLink) authOpenCalendarLink.hidden = true;
+    return;
+  }
+  if (authSyncButton) authSyncButton.hidden = false;
+  if (authOpenCalendarLink) authOpenCalendarLink.hidden = false;
+  calendarSyncInfo.hidden = false;
+
+  try {
+    const stored = await globalThis.PrairieRunExt.storageLocalGet([
+      "prairierunCalendarSync",
+      "prairierunCalendarMappings",
+      "prairierunLastDailyCalendarSync",
+      "prairierunSyncStatus",
+      "prairierunSettings",
+      "prairierunCourseLinks",
+      "prairierunDeadlines",
+    ]);
+    const syncMap = stored.prairierunCalendarSync && typeof stored.prairierunCalendarSync === "object"
+      ? stored.prairierunCalendarSync
+      : {};
+    const count = Object.keys(syncMap).length;
+    const lastDaily = stored.prairierunLastDailyCalendarSync;
+    const syncStatus = stored.prairierunSyncStatus;
+
+    if (syncStatus?.state === "syncing" && syncStatus?.source === "google") {
+      if (calendarSyncStatus) calendarSyncStatus.textContent = "Syncing events to Google Calendar…";
+      if (calendarSyncDetails) calendarSyncDetails.textContent = "";
+      return;
+    }
+
+    if (syncStatus?.state === "error" && syncStatus?.source === "google") {
+      if (calendarSyncStatus) calendarSyncStatus.textContent = syncStatus.current || "Google Calendar sync failed.";
+      if (calendarSyncDetails) calendarSyncDetails.textContent = "Check sign-in and click Sync Calendar to retry.";
+      return;
+    }
+
+    if (count > 0) {
+      let timeStr = "";
+      if (lastDaily) {
+        const d = new Date(lastDaily);
+        if (!Number.isNaN(d.getTime())) {
+          timeStr = ` • Last synced ${formatShortTime(d)}`;
+        }
+      }
+      if (calendarSyncStatus) {
+        calendarSyncStatus.textContent = `✓ ${count} event${count === 1 ? "" : "s"} synced to Google Calendar${timeStr}`;
+      }
+      if (calendarSyncDetails) {
+        const isSingle = stored.prairierunSettings?.googleCalendarLayout === "single";
+        if (isSingle) {
+          calendarSyncDetails.textContent = "Calendar: PrairieRun";
+        } else {
+          const links = stored.prairierunCourseLinks && typeof stored.prairierunCourseLinks === "object"
+            ? Object.keys(stored.prairierunCourseLinks)
+            : [];
+          const deadlineCourses = Array.isArray(stored.prairierunDeadlines)
+            ? stored.prairierunDeadlines.map((i) => i.courseCode || i.courseName)
+            : [];
+          const courseNames = [...new Set([...links, ...deadlineCourses].filter(Boolean))];
+          if (courseNames.length > 0) {
+            calendarSyncDetails.textContent = `Calendars: ${courseNames.map((name) => `PrairieRun — ${name}`).join(", ")}`;
+          } else {
+            calendarSyncDetails.textContent = "One calendar per course";
+          }
+        }
+      }
+    } else {
+      if (calendarSyncStatus) calendarSyncStatus.textContent = "0 events synced to Google Calendar.";
+      if (calendarSyncDetails) calendarSyncDetails.textContent = "Click 'Sync Calendar' or 'Sync now' above to push all eligible assignments.";
+    }
+  } catch (_e) {
+    if (calendarSyncStatus) calendarSyncStatus.textContent = "Google Calendar connected.";
+    if (calendarSyncDetails) calendarSyncDetails.textContent = "";
+  }
+}
+
 function renderAuthStatus(status = {}) {
   if (!authStatusElement) return;
   authRedirectUri = status.redirectUri || "";
@@ -112,6 +212,7 @@ function renderAuthStatus(status = {}) {
     if (authConnectButton) authConnectButton.hidden = true;
     if (authDisconnectButton) authDisconnectButton.hidden = true;
     applyCalendarLayoutUi(false);
+    refreshCalendarSyncStatus(false);
     showAuthError("Google Calendar sign-in is not available in this build.", true);
     return;
   }
@@ -120,12 +221,14 @@ function renderAuthStatus(status = {}) {
     if (authConnectButton) authConnectButton.hidden = true;
     if (authDisconnectButton) authDisconnectButton.hidden = false;
     applyCalendarLayoutUi(true);
+    refreshCalendarSyncStatus(true);
     showAuthError("", false);
   } else {
     authStatusElement.textContent = "No Google Calendar integration";
     if (authConnectButton) authConnectButton.hidden = false;
     if (authDisconnectButton) authDisconnectButton.hidden = true;
     applyCalendarLayoutUi(false);
+    refreshCalendarSyncStatus(false);
     showAuthError("", false);
   }
 }
@@ -406,9 +509,30 @@ if (typeof PrairieRunExt !== "undefined" && typeof PrairieRunExt.addStorageChang
   PrairieRunExt.addStorageChangedListener((changes, areaName) => {
     if (areaName === "local" && changes.prairierunSyncStatus) {
       refreshState();
+      refreshCalendarSyncStatus(true);
+    }
+    if (areaName === "local" && (changes.prairierunCalendarSync || changes.prairierunLastDailyCalendarSync || changes.prairierunCalendarMappings)) {
+      refreshCalendarSyncStatus(true);
     }
     if (areaName === "local" && changes.prairierunSourceStatus) {
       refreshState();
+    }
+  });
+}
+
+if (authSyncButton) {
+  authSyncButton.addEventListener("click", async () => {
+    authSyncButton.disabled = true;
+    if (calendarSyncStatus) calendarSyncStatus.textContent = "Syncing Google Calendar…";
+    try {
+      const resp = await sendRuntimeMessage({ type: "PRAIRIERUN_SYNC_GOOGLE_CALENDAR" });
+      if (!resp?.ok) throw new Error(resp?.error || "Sync failed.");
+      if (resp.result?.ok === false) throw new Error(resp.result?.error || "Sync failed.");
+    } catch (err) {
+      if (calendarSyncStatus) calendarSyncStatus.textContent = `Sync failed: ${err.message}`;
+    } finally {
+      authSyncButton.disabled = false;
+      await refreshCalendarSyncStatus(true);
     }
   });
 }

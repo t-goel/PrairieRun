@@ -44,9 +44,15 @@
               <div class="auth-row">
                 <p id="auth-status" class="muted">Checking connection…</p>
                 <div class="auth-buttons">
+                  <a id="auth-open-calendar" class="secondary" href="https://calendar.google.com" target="_blank" rel="noreferrer" hidden>Open Google Calendar ↗</a>
+                  <button id="auth-sync-calendar" class="secondary" type="button" hidden>Sync Calendar</button>
                   <button id="auth-connect" class="primary">Sign in with Google</button>
                   <button id="auth-disconnect" class="secondary" hidden>Sign out</button>
                 </div>
+              </div>
+              <div id="calendar-sync-info" class="calendar-sync-info" hidden>
+                <p id="calendar-sync-status" class="calendar-sync-status"></p>
+                <p id="calendar-sync-details" class="muted calendar-sync-details"></p>
               </div>
               <p id="auth-error" class="muted error" hidden></p>
               <div class="field-row" id="google-calendar-layout" hidden>

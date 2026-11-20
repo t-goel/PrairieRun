@@ -102,4 +102,16 @@ test("renderRow builds DOM with badge, clean course label, and no overlap", () =
   assert.equal(row.querySelector(".prr-digest-badge").textContent, "Gradescope");
   assert.equal(row.querySelector(".prr-digest-course").textContent, "CS 425");
   assert.equal(row.querySelector(".prr-digest-title").textContent, "HW 4");
+  assert.ok(row.querySelector(".prr-digest-due"));
+});
+
+test("renderRow supports all sources with clean uppercase badge labels", () => {
+  const { document } = require("linkedom").parseHTML("<!doctype html><html><body></body></html>");
+  globalThis.document = document;
+  const sources = ["canvas", "gradescope", "prairietest", "courseweb", "prairielearn"];
+  for (const source of sources) {
+    const r = digest.renderRow(item({ source, title: "Test", courseCode: "CS 101" }));
+    assert.ok(r.querySelector(".prr-digest-badge").textContent.length > 0);
+    assert.equal(r.querySelector(".prr-digest-course").textContent, "CS 101");
+  }
 });
