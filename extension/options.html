@@ -42,16 +42,23 @@
 
             <div id="calendar-google" class="calendar-subsection">
               <div class="auth-row">
-                <p id="auth-status" class="muted">Checking connection…</p>
+                <p id="auth-status" class="muted" hidden></p>
                 <div class="auth-buttons">
-                  <a id="auth-open-calendar" class="secondary" href="https://calendar.google.com" target="_blank" rel="noreferrer" hidden>Open Google Calendar ↗</a>
+                  <a id="auth-open-calendar" class="secondary icon-button" href="https://calendar.google.com" target="_blank" rel="noreferrer" title="Open Google Calendar" aria-label="Open Google Calendar" hidden>
+                    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <rect x="2" y="3" width="12" height="11" rx="1.5"></rect>
+                      <line x1="2" y1="7" x2="14" y2="7"></line>
+                      <line x1="5" y1="1.5" x2="5" y2="3.5"></line>
+                      <line x1="11" y1="1.5" x2="11" y2="3.5"></line>
+                    </svg>
+                  </a>
                   <button id="auth-sync-calendar" class="secondary" type="button" hidden>Sync Calendar</button>
                   <button id="auth-connect" class="primary">Sign in with Google</button>
                   <button id="auth-disconnect" class="secondary" hidden>Sign out</button>
                 </div>
               </div>
-              <div id="calendar-sync-info" class="calendar-sync-info" hidden>
-                <p id="calendar-sync-status" class="calendar-sync-status"></p>
+              <div id="calendar-sync-info" class="calendar-sync-info">
+                <p id="calendar-sync-status" class="calendar-sync-status">No events synced to Google Calendar.</p>
                 <p id="calendar-sync-details" class="muted calendar-sync-details"></p>
               </div>
               <p id="auth-error" class="muted error" hidden></p>

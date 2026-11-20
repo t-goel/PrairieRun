@@ -90,7 +90,9 @@ function refreshAuthStatus() {
     if (!response?.ok) throw new Error(response?.error || "Could not read sign-in status.");
     renderAuthStatus(response.status);
   }).catch((error) => {
-    authStatusElement.textContent = "Connection unknown.";
+    authStatusElement.textContent = "";
+    authStatusElement.hidden = true;
+    refreshCalendarSyncStatus(false);
     showAuthError(error.message, false);
   });
 }
@@ -124,15 +126,16 @@ function formatShortTime(date) {
 
 async function refreshCalendarSyncStatus(authConnected = true) {
   if (!calendarSyncInfo) return;
+  calendarSyncInfo.hidden = false;
   if (!authConnected) {
-    calendarSyncInfo.hidden = true;
     if (authSyncButton) authSyncButton.hidden = true;
     if (authOpenCalendarLink) authOpenCalendarLink.hidden = true;
+    if (calendarSyncStatus) calendarSyncStatus.textContent = "No events synced to Google Calendar.";
+    if (calendarSyncDetails) calendarSyncDetails.textContent = "";
     return;
   }
   if (authSyncButton) authSyncButton.hidden = false;
   if (authOpenCalendarLink) authOpenCalendarLink.hidden = false;
-  calendarSyncInfo.hidden = false;
 
   try {
     const stored = await globalThis.PrairieRunExt.storageLocalGet([
@@ -194,7 +197,7 @@ async function refreshCalendarSyncStatus(authConnected = true) {
         }
       }
     } else {
-      if (calendarSyncStatus) calendarSyncStatus.textContent = "0 events synced to Google Calendar.";
+      if (calendarSyncStatus) calendarSyncStatus.textContent = "No events synced to Google Calendar.";
       if (calendarSyncDetails) calendarSyncDetails.textContent = "Click 'Sync Calendar' or 'Sync now' above to push all eligible assignments.";
     }
   } catch (_e) {
@@ -209,6 +212,7 @@ function renderAuthStatus(status = {}) {
   if (authRedirectElement) authRedirectElement.textContent = authRedirectUri;
   if (!status.clientConfigured) {
     authStatusElement.textContent = "No Google Calendar integration";
+    authStatusElement.hidden = false;
     if (authConnectButton) authConnectButton.hidden = true;
     if (authDisconnectButton) authDisconnectButton.hidden = true;
     applyCalendarLayoutUi(false);
@@ -216,15 +220,15 @@ function renderAuthStatus(status = {}) {
     showAuthError("Google Calendar sign-in is not available in this build.", true);
     return;
   }
+  authStatusElement.textContent = "";
+  authStatusElement.hidden = true;
   if (status.connected) {
-    authStatusElement.textContent = "Signed in";
     if (authConnectButton) authConnectButton.hidden = true;
     if (authDisconnectButton) authDisconnectButton.hidden = false;
     applyCalendarLayoutUi(true);
     refreshCalendarSyncStatus(true);
     showAuthError("", false);
   } else {
-    authStatusElement.textContent = "No Google Calendar integration";
     if (authConnectButton) authConnectButton.hidden = false;
     if (authDisconnectButton) authDisconnectButton.hidden = true;
     applyCalendarLayoutUi(false);
@@ -565,7 +569,9 @@ if (completionThresholdElement) {
 
 if (authConnectButton) authConnectButton.addEventListener("click", () => {
   authConnectButton.disabled = true;
-  if (authStatusElement) authStatusElement.textContent = "Waiting for Google…";
+  if (calendarSyncStatus) calendarSyncStatus.textContent = "Connecting to Google…";
+  if (calendarSyncDetails) calendarSyncDetails.textContent = "";
+  if (authStatusElement) { authStatusElement.textContent = ""; authStatusElement.hidden = true; }
   showAuthError("", false);
   sendRuntimeMessage({ type: "PRAIRIERUN_AUTH_CONNECT" }, 120000).then((response) => {
     authConnectButton.disabled = false;
@@ -574,7 +580,8 @@ if (authConnectButton) authConnectButton.addEventListener("click", () => {
       const mismatch = /redirect_uri_mismatch|redirect_mismatch|Helium|OAuth redirect/i.test(
         `${response?.error || ""} ${response?.code || ""}`,
       );
-      if (authStatusElement) authStatusElement.textContent = "Not connected.";
+      if (authStatusElement) { authStatusElement.textContent = ""; authStatusElement.hidden = true; }
+      refreshCalendarSyncStatus(false);
       applyCalendarLayoutUi(false);
       if (response?.redirectUri) authRedirectUri = response.redirectUri;
       else if (response?.status?.redirectUri) authRedirectUri = response.status.redirectUri;
@@ -600,7 +607,8 @@ if (authConnectButton) authConnectButton.addEventListener("click", () => {
     runManualSync();
   }).catch((error) => {
     authConnectButton.disabled = false;
-    if (authStatusElement) authStatusElement.textContent = "Not connected.";
+    if (authStatusElement) { authStatusElement.textContent = ""; authStatusElement.hidden = true; }
+    refreshCalendarSyncStatus(false);
     applyCalendarLayoutUi(false);
     if (error?.redirectUri) {
       authRedirectUri = error.redirectUri;
