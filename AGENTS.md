@@ -40,10 +40,10 @@ convex/     -> Convex backend for multi-device feed identity (Convex Auth Google
 button opens it via `action.onClicked` (`PrairieRunExt
 .addActionClickedListener`); `options-dashboard.js` drives settings, auth,
 source rows, and Sync now; section scripts render Canvas setup, course links,
-and the Calendar feed card (multi-device activation via Convex Auth Google,
-one-click anonymous activation via `/api/claim`, custom relays in a collapsed
-details; manual `.ics` export buttons were removed — the auto-updating feed
-supersedes them).
+and the Calendar card. The card has two labeled sections: Google Calendar
+(sign-in/status + layout radios, the only sign-in; no timestamped status) and
+the ICS export section (`#calendar-feed` — one-click anonymous activation via
+`/api/claim`, `Copy feed URL`, custom relays; no device-linking UI).
 
 `extension/background.js` imports `extension/oauth-config.js`,
 `extension/auth-utils.js`, then `extension/calendar.js`; `calendar.js` is a
