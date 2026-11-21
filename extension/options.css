@@ -205,8 +205,10 @@ button.secondary {
   flex-wrap: wrap;
   margin-left: auto;
 }
-.auth-buttons button,
-.auth-buttons a.secondary {
+.auth-buttons [hidden] {
+  display: none !important;
+}
+.auth-buttons button {
   width: auto;
   height: 30px;
   box-sizing: border-box;
@@ -226,14 +228,12 @@ button.secondary {
   background: var(--accent);
   color: #fff;
 }
-.auth-buttons button.secondary,
-.auth-buttons a.secondary {
+.auth-buttons button.secondary {
   background: var(--paper);
   color: var(--ink);
   text-decoration: none;
 }
-.auth-buttons button.secondary:hover:not(:disabled),
-.auth-buttons a.secondary:hover {
+.auth-buttons button.secondary:hover:not(:disabled) {
   background: var(--wash);
   transform: translate(1px, 1px);
   box-shadow: 1px 1px 0 var(--ink);
@@ -242,18 +242,21 @@ button.secondary {
   transform: translate(1px, 1px);
   box-shadow: 1px 1px 0 var(--ink);
 }
-.auth-buttons button:active:not(:disabled),
-.auth-buttons a.secondary:active {
+.auth-buttons button:active:not(:disabled) {
   transform: translate(2px, 2px);
   box-shadow: 0 0 0 var(--ink);
 }
-.auth-buttons a.secondary.icon-button {
+.auth-buttons button.icon-button {
   width: 30px;
+  height: 30px;
   padding: 0;
   flex-shrink: 0;
 }
-.auth-buttons a.secondary.icon-button svg {
+.auth-buttons button.icon-button svg {
   display: block;
+  width: 14px;
+  height: 14px;
+  margin: auto;
 }
 .calendar-sync-info {
   margin-top: 10px;

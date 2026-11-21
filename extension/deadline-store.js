@@ -12,7 +12,8 @@
     gradescope: 1,
     prairietest: 2,
     canvas: 3,
-    manual: 4,
+    courseweb: 4,
+    manual: 5,
   };
 
   const LINKED_SOURCES = ["prairielearn", "gradescope", "canvas", "prairietest", "courseweb"];
@@ -91,7 +92,12 @@
     // Already-stored Gradescope items may have a null courseCode when the
     // adapter missed an underscore/term-prefixed short name; recover from
     // courseName so Course links can still group them with Canvas/PL.
-    return embeddedCourseCode(item?.courseName || "");
+    const fromName = embeddedCourseCode(item?.courseName || "");
+    if (fromName) return fromName;
+    // Last resort: the title. Canvas SUMMARY keeps the course code as a title
+    // prefix even when the feed omits the "[subject_NNN...]" code bracket, so
+    // items with an empty courseName would otherwise vanish from Course links.
+    return embeddedCourseCode(item?.title || "");
   }
 
   // Normalize a title for cross-source comparison: lowercase, collapse
@@ -176,6 +182,7 @@
   function relatedTitles(a, b) {
     if (!a || !b) return false;
     if (a === b) return true;
+    if (a.replace(/\s+/g, "") === b.replace(/\s+/g, "")) return true;
     const [short, long] = a.length <= b.length ? [a, b] : [b, a];
     if (short.length < 3) return false;
     if (!long.startsWith(short)) return false;
@@ -189,13 +196,29 @@
   // family's base code ("CS498DK" -> "CS498").
   function suggestCourseLinks(items) {
     const byCode = {};
+    const rescued = new Map();
     for (const item of items || []) {
       const code = courseCodeOf(item);
-      if (!code) continue;
       const source = item?.source;
       const courseKey = item?.courseKey;
       if (!source || !courseKey) continue;
       if (!LINKED_SOURCES.includes(source)) continue;
+      if (code) {
+        // One parseable item rescues its whole (source, courseKey) group:
+        // legacy PrairieLearn rows can lack courseName entirely, and Gradescope
+        // entries may carry a title-only short name. Siblings sharing the
+        // same courseKey are the same real course.
+        const groupKey = `${source}\u0000${courseKey}`;
+        if (!rescued.has(groupKey)) rescued.set(groupKey, code);
+      }
+    }
+    for (const item of items || []) {
+      const source = item?.source;
+      const courseKey = item?.courseKey;
+      if (!source || !courseKey || !LINKED_SOURCES.includes(source)) continue;
+      const groupKey = `${source}\u0000${courseKey}`;
+      const code = courseCodeOf(item) || rescued.get(groupKey) || "";
+      if (!code) continue;
       if (!byCode[code]) byCode[code] = { confirmed: false };
       const entry = byCode[code];
       if (!Array.isArray(entry[source])) entry[source] = [];
@@ -530,6 +553,7 @@
     normTitle,
     normalizeCourseCode,
     familyMapOf,
+    sameCourseFamily,
   };
   globalThis.PrairieRunDeadlineStore = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

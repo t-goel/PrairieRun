@@ -115,3 +115,48 @@ test("renderRow supports all sources with clean uppercase badge labels", () => {
     assert.equal(r.querySelector(".prr-digest-course").textContent, "CS 101");
   }
 });
+
+test("selectDigestItems deduplicates cross-source duplicates for the same course", () => {
+  const now = new Date("2026-11-10T18:00:00Z");
+  const gsItem = item({
+    id: "gs-hw4",
+    source: "gradescope",
+    courseCode: "CS 425",
+    title: "HW4",
+    dueAt: "2026-11-12T06:00:00Z",
+    url: "https://gradescope.com/hw4",
+  });
+  const cwItem = item({
+    id: "cw-hw4",
+    source: "courseweb",
+    courseCode: "CS 425",
+    title: "HW4",
+    dueAt: "2026-11-12T06:00:00Z",
+    url: "https://courses.grainger.illinois.edu/cs425/hw4.html",
+  });
+  const selected = digest.selectDigestItems([gsItem, cwItem], { now });
+  assert.equal(selected.length, 1);
+  assert.equal(selected[0].id, "gs-hw4");
+  assert.equal(selected[0].source, "gradescope");
+});
+
+test("selectDigestItems deduplicates across title whitespace variations (HW4 vs HW 4)", () => {
+  const now = new Date("2026-11-10T18:00:00Z");
+  const gsItem = item({
+    id: "gs-hw4",
+    source: "gradescope",
+    courseCode: "CS 425",
+    title: "HW 4",
+    dueAt: "2026-11-12T06:00:00Z",
+  });
+  const cwItem = item({
+    id: "cw-hw4",
+    source: "courseweb",
+    courseCode: "CS 425",
+    title: "HW4",
+    dueAt: "2026-11-12T06:00:00Z",
+  });
+  const selected = digest.selectDigestItems([cwItem, gsItem], { now });
+  assert.equal(selected.length, 1);
+  assert.equal(selected[0].source, "gradescope");
+});

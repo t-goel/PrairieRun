@@ -85,8 +85,84 @@
     return SOURCE_BADGE[item?.source] || String(item?.source || "?").slice(0, 3).toUpperCase();
   }
 
+  const SOURCE_PRECEDENCE = {
+    prairielearn: 0,
+    gradescope: 1,
+    prairietest: 2,
+    canvas: 3,
+    courseweb: 4,
+    manual: 5,
+  };
+
+  function sourceRank(source) {
+    const rank = SOURCE_PRECEDENCE[source];
+    return typeof rank === "number" ? rank : 99;
+  }
+
+  function normTitle(value) {
+    let text = String(value || "").toLowerCase();
+    text = text.replace(/\(.*?\bcrn\s*\d+.*?\)\s*$/u, "");
+    text = text.replace(/[^\p{L}\p{N} ]+/gu, "");
+    return text.replace(/\s+/g, " ").trim();
+  }
+
+  function titlesMatch(a, b) {
+    const ta = normTitle(a);
+    const tb = normTitle(b);
+    if (!ta || !tb) return false;
+    if (ta === tb) return true;
+    if (ta.replace(/\s+/g, "") === tb.replace(/\s+/g, "")) return true;
+    const [short, long] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
+    if (short.length >= 3 && long.startsWith(short)) {
+      const nextChar = long.charAt(short.length);
+      return nextChar === " " || nextChar === "";
+    }
+    return false;
+  }
+
+  function deduplicateDigestItems(items, links = null) {
+    if (!items || items.length <= 1) return items || [];
+    const kept = [];
+    const store = globalThis.PrairieRunDeadlineStore;
+
+    for (const candidate of items) {
+      const cCourse = (courseLabel(candidate, links) || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+      const cDue = dueMs(candidate);
+      let duplicateIndex = -1;
+
+      for (let i = 0; i < kept.length; i += 1) {
+        const existing = kept[i];
+        if (existing.source === candidate.source) continue;
+        const eCourse = (courseLabel(existing, links) || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+        if (!cCourse || !eCourse) continue;
+        const sameCourse = store && typeof store.sameCourseFamily === "function"
+          ? store.sameCourseFamily(cCourse, eCourse)
+          : (cCourse === eCourse);
+        if (!sameCourse) continue;
+        if (!titlesMatch(existing.title, candidate.title)) continue;
+        const eDue = dueMs(existing);
+        if (cDue != null && eDue != null && Math.abs(cDue - eDue) <= 24 * 60 * 60 * 1000) {
+          duplicateIndex = i;
+          break;
+        }
+      }
+
+      if (duplicateIndex === -1) {
+        kept.push(candidate);
+      } else {
+        const existing = kept[duplicateIndex];
+        const existingRank = sourceRank(existing.source);
+        const candidateRank = sourceRank(candidate.source);
+        if (candidateRank < existingRank) {
+          kept[duplicateIndex] = candidate;
+        }
+      }
+    }
+    return kept;
+  }
+
   // Pure helper: next dated, incomplete items within the window, capped.
-  function selectDigestItems(items, { now = new Date(), limit = DEFAULT_LIMIT, windowDays = DEFAULT_WINDOW_DAYS } = {}) {
+  function selectDigestItems(items, { now = new Date(), limit = DEFAULT_LIMIT, windowDays = DEFAULT_WINDOW_DAYS, links = null } = {}) {
     const start = now instanceof Date ? now.getTime() : Date.parse(now);
     const end = start + Math.max(0, Number(windowDays) || 0) * 24 * 60 * 60 * 1000;
     const rows = [];
@@ -105,7 +181,8 @@
       if (da !== db) return da - db;
       return String(a.title || "").localeCompare(String(b.title || ""));
     });
-    return rows.slice(0, Math.max(0, Number(limit) || DEFAULT_LIMIT));
+    const deduped = deduplicateDigestItems(rows, links);
+    return deduped.slice(0, Math.max(0, Number(limit) || DEFAULT_LIMIT));
   }
 
   function make(tag, attrs = {}, text) {
@@ -169,7 +246,7 @@
         root.append(make("p", { className: "muted" }, error?.message || "Could not load digest."));
         return;
       }
-      const selected = selectDigestItems(items);
+      const selected = selectDigestItems(items, { links });
       if (!selected.length) {
         root.append(make("p", { className: "muted" }, "Nothing upcoming."));
         return;
@@ -195,7 +272,7 @@
     });
   }
 
-  const api = { selectDigestItems, dueMs, courseLabel, renderRow, render };
+  const api = { selectDigestItems, dueMs, courseLabel, renderRow, render, deduplicateDigestItems };
   globalThis.PrairieRunOptionsDigest = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })();

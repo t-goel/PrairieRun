@@ -541,6 +541,12 @@ if (typeof PrairieRunExt !== "undefined" && typeof PrairieRunExt.addStorageChang
   });
 }
 
+if (authOpenCalendarLink) {
+  authOpenCalendarLink.addEventListener("click", () => {
+    globalThis.open("https://calendar.google.com", "_blank", "noreferrer");
+  });
+}
+
 if (authSyncButton) {
   authSyncButton.addEventListener("click", async () => {
     authSyncButton.disabled = true;
