@@ -202,12 +202,26 @@ async function loadGoogleCalendarExportItems() {
     "prairierunDeadlines",
     "prairierunHiddenFromCalendar",
     "prairierunRemovedDeadlines",
+    SETTINGS_KEY,
+    "prairierunKeywordFilters",
   ]);
   const hiddenCalendar = new Set(Array.isArray(stored.prairierunHiddenFromCalendar) ? stored.prairierunHiddenFromCalendar : []);
   const removedDeadlines = new Set(Array.isArray(stored.prairierunRemovedDeadlines) ? stored.prairierunRemovedDeadlines : []);
+  const keywordFilters = [
+    ...(Array.isArray(stored[SETTINGS_KEY]?.keywordFilters) ? stored[SETTINGS_KEY].keywordFilters : []),
+    ...(Array.isArray(stored.prairierunKeywordFilters) ? stored.prairierunKeywordFilters : []),
+  ].map((kw) => String(kw).toLowerCase().trim()).filter(Boolean);
+
+  const matchesKeyword = (title) => {
+    if (!title || !keywordFilters.length) return false;
+    const lower = String(title).toLowerCase();
+    return keywordFilters.some((kw) => lower.includes(kw));
+  };
+
   const isExcluded = (item) => {
     if (!item?.id) return false;
     if (hiddenCalendar.has(item.id) || removedDeadlines.has(item.id)) return true;
+    if (matchesKeyword(item.title) || matchesKeyword(item.name)) return true;
     return (item.aliases || []).some((a) => hiddenCalendar.has(a) || removedDeadlines.has(a));
   };
   const deadlines = (Array.isArray(stored.prairierunDeadlines) ? stored.prairierunDeadlines : []).filter((item) => !isExcluded(item));
@@ -670,6 +684,55 @@ PrairieRunExt.addRuntimeMessageListener((message, sender, sendResponse) => {
         } catch (err) {
           debugLog("Could not update ICS feed for calendar hide toggle", { error: err.message });
         }
+      }
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+  if (message?.type === "PRAIRIERUN_KEYWORD_FILTERS_CHANGED") {
+    (async () => {
+      try {
+        const stored = await PrairieRunExt.storageLocalGet([
+          "prairierunDeadlines",
+          ASSIGNMENTS_KEY,
+          SETTINGS_KEY,
+          "prairierunKeywordFilters",
+        ]);
+        const keywordFilters = [
+          ...(Array.isArray(stored[SETTINGS_KEY]?.keywordFilters) ? stored[SETTINGS_KEY].keywordFilters : []),
+          ...(Array.isArray(stored.prairierunKeywordFilters) ? stored.prairierunKeywordFilters : []),
+        ].map((kw) => String(kw).toLowerCase().trim()).filter(Boolean);
+
+        const matchesKeyword = (title) => {
+          if (!title || !keywordFilters.length) return false;
+          const lower = String(title).toLowerCase();
+          return keywordFilters.some((kw) => lower.includes(kw));
+        };
+
+        const deadlines = Array.isArray(stored.prairierunDeadlines) ? stored.prairierunDeadlines : [];
+        const legacyAssignments = Array.isArray(stored[ASSIGNMENTS_KEY]) ? stored[ASSIGNMENTS_KEY] : [];
+        const allItems = [...deadlines, ...legacyAssignments];
+
+        if (globalThis.PrairieRunCalendar?.removeAssignmentEvent) {
+          for (const item of allItems) {
+            if (item && (matchesKeyword(item.title) || matchesKeyword(item.name))) {
+              try {
+                await PrairieRunCalendar.removeAssignmentEvent(item);
+              } catch (err) {
+                debugLog("Failed to remove filtered item from calendar", { id: item?.id, error: err?.message });
+              }
+            }
+          }
+        }
+
+        await syncGoogleCalendarFromStore("keyword-filter-change");
+
+        if (globalThis.PrairieRunOutputs?.run) {
+          const currentSettings = stored[SETTINGS_KEY] || {};
+          await PrairieRunOutputs.run(deadlines, { added: [], changed: [], removed: [] }, currentSettings);
+        }
+      } catch (err) {
+        debugLog("Error applying keyword filters", { error: err?.message });
       }
       sendResponse({ ok: true });
     })();

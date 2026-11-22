@@ -77,13 +77,30 @@
 
   async function filterActiveCalendarItems(items) {
     try {
-      const stored = (await ext()?.storageLocalGet?.(["prairierunHiddenFromCalendar", "prairierunRemovedDeadlines"])) || {};
+      const stored = (await ext()?.storageLocalGet?.([
+        "prairierunHiddenFromCalendar",
+        "prairierunRemovedDeadlines",
+        SETTINGS_KEY,
+        "prairierunKeywordFilters",
+      ])) || {};
       const hidden = new Set(Array.isArray(stored.prairierunHiddenFromCalendar) ? stored.prairierunHiddenFromCalendar : []);
       const removed = new Set(Array.isArray(stored.prairierunRemovedDeadlines) ? stored.prairierunRemovedDeadlines : []);
-      if (!hidden.size && !removed.size) return items || [];
+      const keywordFilters = [
+        ...(Array.isArray(stored[SETTINGS_KEY]?.keywordFilters) ? stored[SETTINGS_KEY].keywordFilters : []),
+        ...(Array.isArray(stored.prairierunKeywordFilters) ? stored.prairierunKeywordFilters : []),
+      ].map((kw) => String(kw).toLowerCase().trim()).filter(Boolean);
+
+      const matchesKeyword = (title) => {
+        if (!title || !keywordFilters.length) return false;
+        const lower = String(title).toLowerCase();
+        return keywordFilters.some((kw) => lower.includes(kw));
+      };
+
+      if (!hidden.size && !removed.size && !keywordFilters.length) return items || [];
       return (items || []).filter((item) => {
         if (!item?.id) return true;
         if (hidden.has(item.id) || removed.has(item.id)) return false;
+        if (matchesKeyword(item.title) || matchesKeyword(item.name)) return false;
         return !(item.aliases || []).some((a) => hidden.has(a) || removed.has(a));
       });
     } catch {

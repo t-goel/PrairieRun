@@ -5,6 +5,8 @@
   const LINKS_KEY = "prairierunCourseLinks";
   const HIDDEN_CALENDAR_KEY = "prairierunHiddenFromCalendar";
   const REMOVED_DEADLINES_KEY = "prairierunRemovedDeadlines";
+  const KEYWORD_FILTERS_KEY = "prairierunKeywordFilters";
+  const SETTINGS_KEY = "prairierunSettings";
   const DEFAULT_LIMIT = 100;
   const DEFAULT_WINDOW_DAYS = 365;
 
@@ -163,8 +165,17 @@
     return kept;
   }
 
+  function matchesKeywords(title, keywords) {
+    if (!title || !Array.isArray(keywords) || !keywords.length) return false;
+    const lower = String(title).toLowerCase();
+    return keywords.some((kw) => {
+      const k = String(kw || "").toLowerCase().trim();
+      return k && lower.includes(k);
+    });
+  }
+
   // Pure helper: next dated, incomplete items within the window, capped.
-  function selectDigestItems(items, { now = new Date(), limit = DEFAULT_LIMIT, windowDays = DEFAULT_WINDOW_DAYS, links = null, removedDeadlines = [] } = {}) {
+  function selectDigestItems(items, { now = new Date(), limit = DEFAULT_LIMIT, windowDays = DEFAULT_WINDOW_DAYS, links = null, removedDeadlines = [], keywordFilters = [] } = {}) {
     const start = now instanceof Date ? now.getTime() : Date.parse(now);
     const end = windowDays != null ? start + Math.max(0, Number(windowDays) || 0) * 24 * 60 * 60 * 1000 : Infinity;
     const removedSet = new Set(removedDeadlines || []);
@@ -172,6 +183,8 @@
     for (const item of items || []) {
       if (!item || isCompleted(item)) continue;
       if (item.id && (removedSet.has(item.id) || (item.aliases || []).some((a) => removedSet.has(a)))) continue;
+      const title = String(item.title || item.name || "");
+      if (matchesKeywords(title, keywordFilters)) continue;
       const t = dueMs(item);
       if (t === null) continue;
       // Include anything due later today through the window; drop fully past.
@@ -268,6 +281,8 @@
       LINKS_KEY,
       HIDDEN_CALENDAR_KEY,
       REMOVED_DEADLINES_KEY,
+      KEYWORD_FILTERS_KEY,
+      SETTINGS_KEY,
     ]);
     let items = [];
     if (Array.isArray(stored[DEADLINES_KEY])) items = stored[DEADLINES_KEY];
@@ -275,7 +290,11 @@
     const links = stored[LINKS_KEY] && typeof stored[LINKS_KEY] === "object" ? stored[LINKS_KEY] : {};
     const hiddenCalendar = Array.isArray(stored[HIDDEN_CALENDAR_KEY]) ? stored[HIDDEN_CALENDAR_KEY] : [];
     const removedDeadlines = Array.isArray(stored[REMOVED_DEADLINES_KEY]) ? stored[REMOVED_DEADLINES_KEY] : [];
-    return { items, links, hiddenCalendar, removedDeadlines };
+    const keywordFilters = [
+      ...(Array.isArray(stored[SETTINGS_KEY]?.keywordFilters) ? stored[SETTINGS_KEY].keywordFilters : []),
+      ...(Array.isArray(stored[KEYWORD_FILTERS_KEY]) ? stored[KEYWORD_FILTERS_KEY] : []),
+    ];
+    return { items, links, hiddenCalendar, removedDeadlines, keywordFilters };
   }
 
   async function render(section) {
@@ -359,17 +378,19 @@
       let links = {};
       let hiddenCalendarSet = new Set();
       let removedDeadlines = [];
+      let keywordFilters = [];
       try {
         const data = await loadData();
         items = data.items;
         links = data.links;
         hiddenCalendarSet = new Set(data.hiddenCalendar || []);
         removedDeadlines = data.removedDeadlines || [];
+        keywordFilters = data.keywordFilters || [];
       } catch (error) {
         root.append(make("p", { className: "muted" }, error?.message || "Could not load digest."));
         return;
       }
-      const selected = selectDigestItems(items, { links, removedDeadlines });
+      const selected = selectDigestItems(items, { links, removedDeadlines, keywordFilters });
       if (!selected.length) {
         root.append(make("p", { className: "muted" }, "Nothing upcoming."));
         return;
@@ -395,7 +416,9 @@
           changes[ASSIGNMENTS_KEY] ||
           changes[LINKS_KEY] ||
           changes[HIDDEN_CALENDAR_KEY] ||
-          changes[REMOVED_DEADLINES_KEY]
+          changes[REMOVED_DEADLINES_KEY] ||
+          changes[KEYWORD_FILTERS_KEY] ||
+          changes[SETTINGS_KEY]
         ) {
           refresh();
         }
