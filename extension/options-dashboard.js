@@ -267,8 +267,8 @@ function showAuthError(text, isError) {
 
 function renderSources() {
   if (!sourcesListElement) return;
-  sourcesListElement.textContent = "";
   if (!cachedSources.length) {
+    sourcesListElement.textContent = "";
     showSyncStatus("No sources registered.");
     return;
   }
@@ -299,68 +299,139 @@ function chipFor(entry) {
 function rowForSource(source, entry) {
   const enabled = sourceEnabled(source);
   const chip = enabled ? chipFor(entry) : { text: "off", className: "disabled", action: null };
-  const row = document.createElement("li");
-  row.className = "source-row";
 
-  const toggle = document.createElement("input");
-  toggle.type = "checkbox";
-  toggle.className = "source-toggle";
-  toggle.checked = enabled;
-  toggle.setAttribute("aria-label", `Include ${source.label || source.id} scans`);
-  toggle.addEventListener("change", () => toggleSource(source, toggle));
-  row.appendChild(toggle);
+  let item = sourcesListElement.querySelector(`li[data-source-id="${source.id}"]`);
+  let row;
+  let toggle;
+  let info;
+  let label;
+  let status;
+  let badge;
 
-  const info = document.createElement("div");
-  info.className = "source-info";
-  const label = document.createElement("span");
-  label.className = "source-label";
-  label.textContent = source.label || source.id;
-  info.appendChild(label);
-  const status = document.createElement("span");
-  status.className = "source-checked";
-  status.textContent = !enabled
-    ? "off"
-    : entry?.error && entry.status !== "signed_out" && entry.status !== "disabled"
-      ? entry.error
-      : formatCentralCheckedAt(entry?.checkedAt);
-  info.appendChild(status);
-  row.appendChild(info);
+  if (!item) {
+    item = document.createElement("li");
+    item.className = "source-item";
+    item.setAttribute("data-source-id", source.id);
 
-  const badge = document.createElement("span");
-  badge.className = `chip ${chip.className}`;
-  badge.textContent = chip.text;
-  row.appendChild(badge);
+    row = document.createElement("div");
+    row.className = "source-row";
 
-  if (chip.action === "signin" && (source.signInUrl || entry?.signInUrl)) {
-    const button = document.createElement("button");
-    button.className = "secondary source-action";
-    button.textContent = "Sign in";
-    button.addEventListener("click", () => {
-      PrairieRunExt.tabsCreateForeground(source.signInUrl || entry.signInUrl).catch((error) => showStatus(error.message, true));
-    });
-    row.appendChild(button);
-  }
-  if (chip.action === "grant") {
-    const button = document.createElement("button");
-    button.className = "secondary source-action";
-    button.textContent = "Grant access";
-    // This click counts as the user gesture the permissions API requires.
-    button.addEventListener("click", async () => {
-      button.disabled = true;
-      try {
-        const granted = await grantSourcePermission(source);
-        if (!granted) showStatus(permissionHelpMessage(source), true);
-        else syncNowButton?.click();
-      } catch (error) {
-        showStatus(error.message, true);
-      } finally {
-        button.disabled = false;
-        refreshState();
+    toggle = document.createElement("input");
+    toggle.type = "checkbox";
+    toggle.className = "source-toggle";
+    toggle.setAttribute("aria-label", `Include ${source.label || source.id} scans`);
+    row.appendChild(toggle);
+
+    info = document.createElement("div");
+    info.className = "source-info";
+    label = document.createElement("span");
+    label.className = "source-label";
+    info.appendChild(label);
+    status = document.createElement("span");
+    status.className = "source-checked";
+    info.appendChild(status);
+    row.appendChild(info);
+
+    badge = document.createElement("span");
+    badge.className = "chip";
+    row.appendChild(badge);
+
+    item.appendChild(row);
+
+    if (source.id === "canvas") {
+      const subpanel = document.createElement("div");
+      subpanel.id = "canvas-setup";
+      subpanel.className = "source-subpanel source-subpanel--canvas";
+      item.appendChild(subpanel);
+      if (typeof globalThis.PrairieRunOptionsCanvas?.render === "function") {
+        globalThis.PrairieRunOptionsCanvas.render(subpanel);
       }
-    });
-    row.appendChild(button);
+    } else if (source.id === "courseweb") {
+      const subpanel = document.createElement("div");
+      subpanel.id = "course-websites";
+      subpanel.className = "source-subpanel source-subpanel--courseweb";
+      subpanel.innerHTML = `
+        <form id="course-websites-form" class="course-websites-form">
+          <div class="course-websites-add">
+            <input id="course-website-url" type="url" placeholder="https://courses.grainger.illinois.edu/cs425/fa2026/assignments.html" aria-label="UIUC course page URL" required />
+            <button class="secondary" type="submit">Add</button>
+          </div>
+        </form>
+        <ul id="course-websites-list" class="course-websites-list"></ul>
+        <p id="course-websites-status" class="muted" hidden></p>
+      `;
+      item.appendChild(subpanel);
+      if (typeof globalThis.PrairieRunCourseWebOptions?.init === "function") {
+        globalThis.PrairieRunCourseWebOptions.init(subpanel);
+      }
+    }
+
+    sourcesListElement.appendChild(item);
+  } else {
+    row = item.querySelector(".source-row") || item;
+    toggle = item.querySelector(".source-toggle");
+    label = item.querySelector(".source-label");
+    status = item.querySelector(".source-checked");
+    badge = item.querySelector(".chip");
   }
-  sourcesListElement.appendChild(row);
+
+  if (toggle) {
+    toggle.checked = enabled;
+    if (!toggle._hasBoundToggle) {
+      toggle._hasBoundToggle = true;
+      toggle.addEventListener("change", () => toggleSource(source, toggle));
+    }
+  }
+
+  if (label) {
+    label.textContent = source.label || source.id;
+  }
+
+  if (status) {
+    status.textContent = !enabled
+      ? "off"
+      : entry?.error && entry.status !== "signed_out" && entry.status !== "disabled"
+        ? entry.error
+        : formatCentralCheckedAt(entry?.checkedAt);
+  }
+
+  if (badge) {
+    badge.className = `chip ${chip.className}`;
+    badge.textContent = chip.text;
+  }
+
+  if (row) {
+    row.querySelectorAll("button.source-action").forEach((btn) => btn.remove());
+    if (chip.action === "signin" && (source.signInUrl || entry?.signInUrl)) {
+      const button = document.createElement("button");
+      button.className = "secondary source-action";
+      button.textContent = "Sign in";
+      button.addEventListener("click", () => {
+        PrairieRunExt.tabsCreateForeground(source.signInUrl || entry.signInUrl).catch((error) => showStatus(error.message, true));
+      });
+      row.appendChild(button);
+    }
+    if (chip.action === "grant") {
+      const button = document.createElement("button");
+      button.className = "secondary source-action";
+      button.textContent = "Grant access";
+      // This click counts as the user gesture the permissions API requires.
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          const granted = await grantSourcePermission(source);
+          if (!granted) showStatus(permissionHelpMessage(source), true);
+          else syncNowButton?.click();
+        } catch (error) {
+          showStatus(error.message, true);
+        } finally {
+          button.disabled = false;
+          refreshState();
+        }
+      });
+      row.appendChild(button);
+    }
+  }
 }
 
 function hostLabelForSource(source) {

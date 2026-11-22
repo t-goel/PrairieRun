@@ -259,13 +259,18 @@
   }
 
   if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
-    document.addEventListener("DOMContentLoaded", () => {
-      const section = document.getElementById("canvas-setup");
+    const init = () => {
+      const section = typeof document.getElementById === "function" ? document.getElementById("canvas-setup") : null;
       if (section) {
         section.removeAttribute("hidden");
         render(section);
       }
-    });
+    };
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", init);
+    } else {
+      init();
+    }
   }
 
   const api = { render, maskFeedUrl };

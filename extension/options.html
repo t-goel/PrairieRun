@@ -28,11 +28,69 @@
               <button id="sync-now" class="secondary sync-now" type="button">Sync now</button>
             </div>
             <p id="sync-status" class="muted" data-pr-sync-status hidden></p>
-            <ul class="sources-list" id="sources-list"></ul>
-          </section>
-
-          <section class="card" id="course-links">
-            <h2>Course links</h2>
+            <ul class="sources-list" id="sources-list">
+              <li class="source-item" data-source-id="prairielearn">
+                <div class="source-row">
+                  <input type="checkbox" class="source-toggle" aria-label="Include PrairieLearn scans" checked />
+                  <div class="source-info">
+                    <span class="source-label">PrairieLearn</span>
+                    <span class="source-checked">off</span>
+                  </div>
+                  <span class="chip disabled">off</span>
+                </div>
+              </li>
+              <li class="source-item" data-source-id="canvas">
+                <div class="source-row">
+                  <input type="checkbox" class="source-toggle" aria-label="Include Canvas scans" />
+                  <div class="source-info">
+                    <span class="source-label">Canvas</span>
+                    <span class="source-checked">off</span>
+                  </div>
+                  <span class="chip disabled">off</span>
+                </div>
+                <div id="canvas-setup" class="source-subpanel source-subpanel--canvas"></div>
+              </li>
+              <li class="source-item" data-source-id="gradescope">
+                <div class="source-row">
+                  <input type="checkbox" class="source-toggle" aria-label="Include Gradescope scans" />
+                  <div class="source-info">
+                    <span class="source-label">Gradescope</span>
+                    <span class="source-checked">off</span>
+                  </div>
+                  <span class="chip disabled">off</span>
+                </div>
+              </li>
+              <li class="source-item" data-source-id="prairietest">
+                <div class="source-row">
+                  <input type="checkbox" class="source-toggle" aria-label="Include PrairieTest scans" />
+                  <div class="source-info">
+                    <span class="source-label">PrairieTest</span>
+                    <span class="source-checked">off</span>
+                  </div>
+                  <span class="chip disabled">off</span>
+                </div>
+              </li>
+              <li class="source-item" data-source-id="courseweb">
+                <div class="source-row">
+                  <input type="checkbox" class="source-toggle" aria-label="Include UIUC course websites scans" />
+                  <div class="source-info">
+                    <span class="source-label">UIUC course websites</span>
+                    <span class="source-checked">off</span>
+                  </div>
+                  <span class="chip disabled">off</span>
+                </div>
+                <div id="course-websites" class="source-subpanel source-subpanel--courseweb">
+                  <form id="course-websites-form" class="course-websites-form">
+                    <div class="course-websites-add">
+                      <input id="course-website-url" type="url" placeholder="https://courses.grainger.illinois.edu/cs425/fa2026/assignments.html" aria-label="UIUC course page URL" required />
+                      <button class="secondary" type="submit">Add</button>
+                    </div>
+                  </form>
+                  <ul id="course-websites-list" class="course-websites-list"></ul>
+                  <p id="course-websites-status" class="muted" hidden></p>
+                </div>
+              </li>
+            </ul>
           </section>
         </div>
 
@@ -72,16 +130,9 @@
 
             <div id="calendar-feed" class="calendar-subsection"></div>
           </section>
-          <section class="card" id="course-websites">
-            <h2>Course websites</h2>
-            <form id="course-websites-form" class="course-websites-form">
-              <div class="course-websites-add">
-                <input id="course-website-url" type="url" placeholder="https://courses.grainger.illinois.edu/cs425/fa2026/assignments.html" aria-label="UIUC course page URL" required />
-                <button class="secondary" type="submit">Add</button>
-              </div>
-            </form>
-            <ul id="course-websites-list" class="course-websites-list"></ul>
-            <p id="course-websites-status" class="muted" hidden></p>
+
+          <section class="card" id="course-links">
+            <h2>Course links</h2>
           </section>
 
           <section class="card" id="assignment-filters">
@@ -91,10 +142,6 @@
               <input type="text" id="filter-keyword-input" class="prr-chip-input" placeholder="Type keyword and press Enter…" aria-label="Exclude keywords" />
             </div>
             <p id="filter-status" class="muted filter-status" hidden></p>
-          </section>
-
-          <section class="card" id="canvas-setup" hidden>
-            <h2>Canvas</h2>
           </section>
         </div>
 

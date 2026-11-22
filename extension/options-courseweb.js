@@ -1,10 +1,9 @@
 // User-maintained list of UIUC course pages used by the courseweb source.
 (function () {
-  const form = document.querySelector("#course-websites-form");
-  const input = document.querySelector("#course-website-url");
-  const list = document.querySelector("#course-websites-list");
-  const status = document.querySelector("#course-websites-status");
-  if (!form || !input || !list) return;
+  let form = null;
+  let input = null;
+  let list = null;
+  let status = null;
 
   function setStatus(message, error = false) {
     if (!status) return;
@@ -26,6 +25,7 @@
   }
 
   async function render() {
+    if (!list) return;
     const current = await readSettings();
     const sites = Array.isArray(current.courseWebsites) ? current.courseWebsites : [];
     list.textContent = "";
@@ -59,34 +59,69 @@
     else if (!status?.classList.contains("error")) setStatus("");
   }
 
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const url = normalizeUrl(input.value);
-    if (!url) {
-      setStatus("Enter an HTTPS course page on illinois.edu.", true);
-      return;
-    }
-    try {
-      const current = await readSettings();
-      const sites = (Array.isArray(current.courseWebsites) ? current.courseWebsites : []).map(normalizeUrl).filter(Boolean);
-      if (!sites.includes(url)) sites.push(url);
-      if (sites.length > 25) {
-        setStatus("PrairieRun can scan up to 25 saved course pages.", true);
-        return;
-      }
-      current.courseWebsites = sites;
-      await PrairieRunExt.storageLocalSet({ prairierunSettings: current });
-      input.value = "";
-      setStatus(sites.includes(url) ? "Course page saved. Enable UIUC course websites in Sources, then Sync now." : "Course page saved.");
-      await render();
-      setStatus("Course page saved. Enable UIUC course websites in Sources, then Sync now.");
-    } catch (error) {
-      setStatus(error?.message || "Could not save that course page.", true);
-    }
-  });
+  function init(container = (typeof document !== "undefined" ? document : null)) {
+    if (!container || typeof container.querySelector !== "function") return;
+    form = container.querySelector("#course-websites-form");
+    input = container.querySelector("#course-website-url");
+    list = container.querySelector("#course-websites-list");
+    status = container.querySelector("#course-websites-status");
+    if (!form || !input || !list) return;
 
-  render().catch((error) => setStatus(error?.message || "Could not load saved course pages.", true));
-  PrairieRunExt.addStorageChangedListener?.((changes, areaName) => {
+    if (!form._hasBoundSubmit) {
+      form._hasBoundSubmit = true;
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const url = normalizeUrl(input.value);
+        if (!url) {
+          setStatus("Enter an HTTPS course page on illinois.edu.", true);
+          return;
+        }
+        try {
+          const current = await readSettings();
+          const sites = (Array.isArray(current.courseWebsites) ? current.courseWebsites : []).map(normalizeUrl).filter(Boolean);
+          if (!sites.includes(url)) sites.push(url);
+          if (sites.length > 25) {
+            setStatus("PrairieRun can scan up to 25 saved course pages.", true);
+            return;
+          }
+          current.courseWebsites = sites;
+          await PrairieRunExt.storageLocalSet({ prairierunSettings: current });
+          input.value = "";
+          await render();
+          const enabled = current?.sources?.courseweb?.enabled === true;
+          if (enabled) {
+            setStatus("Course page saved. Syncing…");
+            try {
+              await PrairieRunExt.runtimeSendMessage({ type: "PRAIRIERUN_SYNC_NOW" });
+              setStatus("Course page saved.");
+            } catch {
+              setStatus("Course page saved. Sync now from Sources.");
+            }
+          } else {
+            setStatus("Course page saved. Enable UIUC course websites in Sources, then Sync now.");
+          }
+        } catch (error) {
+          setStatus(error?.message || "Could not save that course page.", true);
+        }
+      });
+    }
+
+    return render().catch((error) => setStatus(error?.message || "Could not load saved course pages.", true));
+  }
+
+  if (typeof document !== "undefined") {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", () => init());
+    } else {
+      init();
+    }
+  }
+
+  PrairieRunExt?.addStorageChangedListener?.((changes, areaName) => {
     if (areaName === "local" && changes.prairierunSettings) render().catch(() => undefined);
   });
+
+  const api = { init, render };
+  globalThis.PrairieRunCourseWebOptions = api;
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
 })();
