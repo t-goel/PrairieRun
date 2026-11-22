@@ -125,6 +125,27 @@ function formatShortTime(date) {
   return `${date.toLocaleDateString([], { month: "short", day: "numeric" })} at ${time}`;
 }
 
+function formatRelativeAgo(date) {
+  if (!date) return "";
+  const d = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(d.getTime())) return "";
+  const diffMs = Math.max(0, Date.now() - d.getTime());
+  const oneMin = 60 * 1000;
+  const oneHour = 60 * oneMin;
+  const oneDay = 24 * oneHour;
+
+  if (diffMs < oneHour) {
+    const mins = Math.max(1, Math.round(diffMs / oneMin));
+    return `${mins} min ago`;
+  }
+  if (diffMs < oneDay) {
+    const hours = Math.max(1, Math.round(diffMs / oneHour));
+    return `${hours} hr ago`;
+  }
+  const days = Math.max(1, Math.round(diffMs / oneDay));
+  return `${days} d ago`;
+}
+
 async function refreshCalendarSyncStatus(authConnected = isGoogleConnected) {
   if (!calendarSyncInfo) return;
   calendarSyncInfo.hidden = false;
@@ -185,15 +206,19 @@ async function refreshCalendarSyncStatus(authConnected = isGoogleConnected) {
     const lastDaily = stored.prairierunLastDailyCalendarSync;
 
     if (count > 0) {
-      let timeStr = "";
-      if (lastDaily) {
-        const d = new Date(lastDaily);
-        if (!Number.isNaN(d.getTime())) {
-          timeStr = ` • Last synced ${formatShortTime(d)}`;
+      let latestTimestamp = lastDaily;
+      if (!latestTimestamp) {
+        for (const entry of Object.values(syncMap)) {
+          if (entry?.lastSyncedAt) {
+            if (!latestTimestamp || new Date(entry.lastSyncedAt) > new Date(latestTimestamp)) {
+              latestTimestamp = entry.lastSyncedAt;
+            }
+          }
         }
       }
+      const agoStr = latestTimestamp ? formatRelativeAgo(latestTimestamp) : "";
       if (calendarSyncStatus) {
-        calendarSyncStatus.textContent = `✓ ${count} event${count === 1 ? "" : "s"} synced to Google Calendar${timeStr}`;
+        calendarSyncStatus.textContent = `Synced ${count} event${count === 1 ? "" : "s"}${agoStr ? ` ${agoStr}` : ""}`;
       }
       if (calendarSyncDetails) {
         const isSingle = stored.prairierunSettings?.googleCalendarLayout === "single";
@@ -210,7 +235,7 @@ async function refreshCalendarSyncStatus(authConnected = isGoogleConnected) {
           if (courseNames.length > 0) {
             calendarSyncDetails.textContent = `Calendars: ${courseNames.map((name) => `PrairieRun — ${name}`).join(", ")}`;
           } else {
-            calendarSyncDetails.textContent = "One calendar per course";
+            calendarSyncDetails.textContent = "1 calendar per course";
           }
         }
       }

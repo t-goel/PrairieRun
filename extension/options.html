@@ -83,7 +83,12 @@
                   <form id="course-websites-form" class="course-websites-form">
                     <div class="course-websites-add">
                       <input id="course-website-url" type="url" placeholder="https://courses.grainger.illinois.edu/cs425/fa2026/assignments.html" aria-label="UIUC course page URL" required />
-                      <button class="secondary" type="submit">Add</button>
+                      <button class="secondary icon-button" type="submit" title="Add course page" aria-label="Add course page">
+                        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <line x1="8" y1="3" x2="8" y2="13"></line>
+                          <line x1="3" y1="8" x2="13" y2="8"></line>
+                        </svg>
+                      </button>
                     </div>
                   </form>
                   <ul id="course-websites-list" class="course-websites-list"></ul>
@@ -99,7 +104,11 @@
             <h2>Calendar</h2>
 
             <div id="calendar-google" class="calendar-subsection">
-              <div class="auth-row">
+              <div class="auth-row calendar-google-head">
+                <div id="calendar-sync-info" class="calendar-sync-info">
+                  <p id="calendar-sync-status" class="calendar-sync-status">No events synced to Google Calendar.</p>
+                  <p id="calendar-sync-details" class="muted calendar-sync-details"></p>
+                </div>
                 <p id="auth-status" class="muted" hidden></p>
                 <div class="auth-buttons">
                   <button id="auth-open-calendar" class="secondary icon-button" type="button" title="Open Google Calendar" aria-label="Open Google Calendar" hidden>
@@ -111,18 +120,14 @@
                     </svg>
                   </button>
                   <button id="auth-sync-calendar" class="secondary" type="button" hidden>Sync Calendar</button>
-                  <button id="auth-connect" class="primary">Sign in with Google</button>
+                  <button id="auth-connect" class="primary">Sign in</button>
                   <button id="auth-disconnect" class="secondary" hidden>Sign out</button>
                 </div>
               </div>
-              <div id="calendar-sync-info" class="calendar-sync-info">
-                <p id="calendar-sync-status" class="calendar-sync-status">No events synced to Google Calendar.</p>
-                <p id="calendar-sync-details" class="muted calendar-sync-details"></p>
-              </div>
               <p id="auth-error" class="muted error" hidden></p>
               <div class="field-row" id="google-calendar-layout" hidden>
-                <label><input type="radio" name="google-calendar-layout" value="per_course" checked /> One calendar per course</label>
-                <label><input type="radio" name="google-calendar-layout" value="single" /> One PrairieRun calendar</label>
+                <label><input type="radio" name="google-calendar-layout" value="per_course" checked /> 1 calendar per course</label>
+                <label><input type="radio" name="google-calendar-layout" value="single" /> 1 calendar</label>
               </div>
               <code id="auth-redirect" hidden></code>
               <button id="auth-copy-redirect" type="button" hidden>Copy</button>

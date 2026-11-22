@@ -259,12 +259,30 @@ button.secondary {
   margin: auto;
 }
 .calendar-sync-info {
-  margin-top: 10px;
-  padding: 8px 12px;
+  margin-top: 0;
+  padding: 6px 10px;
   background: var(--wash);
   border: 2px solid var(--ink);
   display: grid;
-  gap: 3px;
+  gap: 2px;
+}
+.calendar-sync-details:empty {
+  display: none;
+}
+.calendar-google-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+}
+.calendar-google-head .calendar-sync-info {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
+}
+.calendar-google-head .auth-buttons {
+  flex-shrink: 0;
+  margin-left: 0;
 }
 .calendar-sync-status {
   font-size: 12px;
@@ -326,13 +344,38 @@ button.secondary {
 .auth-redirect-row code {
   flex: 1;
   min-width: 0;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
   font-size: 11px;
   padding: 6px 8px;
   border: 2px solid var(--ink);
   background: var(--wash);
+  box-sizing: border-box;
 }
-.auth-redirect-row button { width: auto; padding: 6px 10px; font-size: 11px; }
+.auth-redirect-row button.icon-button {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0 !important;
+  margin: 0 !important;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+.auth-redirect-row button.icon-button svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  margin: auto;
+}
+.auth-redirect-row button:not(.icon-button) {
+  width: auto;
+  padding: 6px 10px;
+  font-size: 11px;
+}
 
 .sources-head {
   display: flex;
@@ -376,15 +419,30 @@ button.sync-now { width: auto; padding: 7px 10px; font-size: 11px; }
 }
 .course-websites-add button {
   flex: 0 0 auto;
-  margin: 0 !important;
+  width: 36px;
   height: 36px;
-  padding: 0 14px;
+  min-width: 36px;
+  padding: 0 !important;
+  margin: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   box-sizing: border-box;
 }
+.course-websites-add button svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  margin: auto;
+}
+.card ul.course-websites-list,
+ul.course-websites-list,
 .course-websites-list {
-  list-style: none;
-  margin: 8px 0 0;
-  padding: 0;
+  list-style: none !important;
+  margin: 8px 0 0 !important;
+  padding: 0 !important;
+  padding-left: 0 !important;
+  margin-left: 0 !important;
   display: grid;
   gap: 6px;
 }
@@ -394,8 +452,8 @@ button.sync-now { width: auto; padding: 7px 10px; font-size: 11px; }
   gap: 8px;
   border: none;
   background: transparent;
-  padding: 0;
-  margin: 4px 0;
+  padding: 0 !important;
+  margin: 4px 0 !important;
 }
 .course-website-row a {
   flex: 1;
@@ -410,11 +468,13 @@ button.sync-now { width: auto; padding: 7px 10px; font-size: 11px; }
   width: 32px;
   height: 32px;
   min-width: 32px;
-  padding: 0;
+  padding: 0 !important;
+  margin: 0 !important;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+  box-sizing: border-box;
 }
 .course-website-row button.course-website-remove svg,
 .pr-canvas-connected button.icon-button svg {
@@ -423,7 +483,6 @@ button.sync-now { width: auto; padding: 7px 10px; font-size: 11px; }
   height: 14px;
   margin: auto;
 }
-.course-website-row button { margin: 0 !important; padding: 4px 8px; font-size: 11px; }
 
 /* Filters card & Chip input */
 #assignment-filters {
@@ -783,7 +842,7 @@ button.source-action { width: 100%; padding: 6px 10px; font-size: 11px; margin-t
 #course-links table th:first-child,
 #course-links table td:first-child {
   text-align: left;
-  padding-left: 2px;
+  padding-left: 0 !important;
 }
 #course-links table th:not(:first-child),
 #course-links table td:not(:first-child) {
@@ -863,23 +922,29 @@ span.prr-digest-title { text-decoration: none; }
   white-space: nowrap;
   justify-self: end;
 }
+.card .prr-digest-actions,
 .prr-digest-actions {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   justify-self: end;
   flex-shrink: 0;
+  margin: 0 !important;
+  padding: 0 !important;
 }
+.card .prr-digest-actions button,
+.card button.prr-digest-action-btn,
 .prr-digest-action-btn {
   width: 26px;
   height: 26px;
   box-sizing: border-box;
-  padding: 0;
-  margin: 0;
+  padding: 0 !important;
+  margin: 0 !important;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   vertical-align: middle;
+  align-self: center;
   background: var(--paper);
   color: var(--ink);
   border: 2px solid var(--ink);

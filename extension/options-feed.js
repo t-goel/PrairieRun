@@ -172,17 +172,30 @@
     }
   }
 
-  function wireCopyButton(button, getUrl) {
+  const COPY_SVG = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2"></rect><path d="M10.5 5.5V3a1.5 1.5 0 0 0-1.5-1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h2.5"></path></svg>';
+  const CHECK_SVG = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3.5 8.5 6.5 11.5 12.5 5"></polyline></svg>';
+
+  function wireCopyButton(button, getUrl, title = "Copy feed URL") {
+    button.innerHTML = COPY_SVG;
+    button.title = title;
+    button.setAttribute("aria-label", title);
     button.addEventListener("click", async () => {
       const url = typeof getUrl === "function" ? getUrl() : getUrl;
       if (!url) return;
       try {
         await navigator.clipboard.writeText(url);
-        button.textContent = "Copied";
+        button.innerHTML = CHECK_SVG;
+        button.title = "Copied";
+        button.setAttribute("aria-label", "Copied");
       } catch {
-        button.textContent = "Copy failed";
+        button.title = "Copy failed";
+        button.setAttribute("aria-label", "Copy failed");
       }
-      setTimeout(() => { button.textContent = "Copy"; }, 1500);
+      setTimeout(() => {
+        button.innerHTML = COPY_SVG;
+        button.title = title;
+        button.setAttribute("aria-label", title);
+      }, 1500);
     });
   }
 
@@ -208,14 +221,22 @@
     const feedAuthApi = auth();
     const defaultRelayUrl = relayApi.DEFAULT_RELAY_URL || FALLBACK_RELAY_URL;
 
-    // ICS export: subscription URL, Copy feed URL action, and this
+    // ICS export: subscription URL, inline Copy feed URL action, and this
     // section's own status line. The Google sign-in lives in the dashboard's
     // auth controls above; device linking is not offered here.
     const actions = make("div", { className: "prr-feed-actions" });
     const urlRow = make("div", { className: "auth-redirect-row prr-feed-url-row", hidden: "hidden" });
     const urlLabel = make("span", { className: "prr-feed-url-label", hidden: "hidden" }, "All courses");
     const urlCode = make("code", {});
-    urlRow.append(urlLabel, urlCode);
+    const copyFeedButton = make("button", {
+      type: "button",
+      className: "secondary icon-button",
+      "data-prr-copy-feed": "1",
+      title: "Copy feed URL",
+      "aria-label": "Copy feed URL",
+    });
+    copyFeedButton.innerHTML = COPY_SVG;
+    urlRow.append(urlLabel, urlCode, copyFeedButton);
 
     const courseFeedsList = make("div", {
       className: "prr-course-feeds",
@@ -228,7 +249,7 @@
     // The ICS option is the anonymous subscribe path: Google sign-in is the
     // other option on the Google Calendar section above; device linking is
     // not offered here.
-    const label = make("p", { className: "muted calendar-feed-label" }, "Anonymous ICS export");
+    const label = make("p", { className: "muted calendar-feed-label" }, "Export iCS to any app without sign-in");
     root.append(label, urlRow, courseFeedsList, actions, statusLine);
 
     // Mint/repair feed credentials, publish, return subscription URL or "".
@@ -310,7 +331,6 @@
     }
 
     // Ensure a blob .ics URL exists (claim + publish), then copy it.
-    const copyFeedButton = make("button", { type: "button", className: "secondary" }, "Copy feed URL");
     copyFeedButton.addEventListener("click", async () => {
       copyFeedButton.disabled = true;
       try {
@@ -323,14 +343,21 @@
 
         try {
           await navigator.clipboard.writeText(url);
-          copyFeedButton.textContent = "Copied";
+          copyFeedButton.innerHTML = CHECK_SVG;
+          copyFeedButton.title = "Copied";
+          copyFeedButton.setAttribute("aria-label", "Copied");
         } catch {
           urlRow.hidden = false;
           urlCode.textContent = url;
-          copyFeedButton.textContent = "Copy failed";
+          copyFeedButton.title = "Copy failed";
+          copyFeedButton.setAttribute("aria-label", "Copy failed");
         }
         statusLine.textContent = "";
-        setTimeout(() => { copyFeedButton.textContent = "Copy feed URL"; }, 1500);
+        setTimeout(() => {
+          copyFeedButton.innerHTML = COPY_SVG;
+          copyFeedButton.title = "Copy feed URL";
+          copyFeedButton.setAttribute("aria-label", "Copy feed URL");
+        }, 1500);
       } catch (error) {
         statusLine.textContent = error?.message || "Could not copy your feed URL.";
       } finally {
@@ -364,8 +391,8 @@
         const label = make("span", { className: "prr-course-feed-label" }, code);
         const codeEl = make("code", {});
         codeEl.textContent = url;
-        const copy = make("button", { className: "secondary", type: "button" }, "Copy");
-        wireCopyButton(copy, () => url);
+        const copy = make("button", { className: "secondary icon-button", type: "button", title: `Copy ${code} feed URL`, "aria-label": `Copy ${code} feed URL` });
+        wireCopyButton(copy, () => url, `Copy ${code} feed URL`);
         row.append(label, codeEl, copy);
         courseFeedsList.appendChild(row);
       }
@@ -388,7 +415,6 @@
       renderCourseFeeds(publishReady ? courseFeeds : {});
 
       actions.textContent = "";
-      actions.appendChild(copyFeedButton);
 
       const noisy = /already exists|allowOverwrite/i.test(state?.error || "");
       const showError = state?.state === "error" && state?.error && !noisy;
