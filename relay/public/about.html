@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>About — PrairieRun</title>
+  <meta name="description" content="Learn about PrairieRun, the open-source deadline tracker and calendar synchronizer for UIUC students.">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📅</text></svg>">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a href="/" class="brand">
+        PrairieRun <span class="brand-badge">UIUC</span>
+      </a>
+      <nav class="nav-links">
+        <a href="/" class="nav-link">Home</a>
+        <a href="/about" class="nav-link" style="color: var(--primary);">About</a>
+        <a href="/privacy" class="nav-link">Privacy</a>
+        <a href="https://github.com/t-goel/PrairieRun" target="_blank" rel="noreferrer" class="nav-link">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container page-content">
+    <header class="page-header">
+      <h1 class="page-title">About PrairieRun</h1>
+      <p class="page-meta">Built by UIUC students, for UIUC students.</p>
+    </header>
+
+    <article class="prose">
+      <p>
+        At the University of Illinois Urbana-Champaign (UIUC), academic life is fragmented across a dozen disparate platforms. One course uses PrairieLearn for homework; another uses Gradescope for quizzes, Canvas for discussions, PrairieTest for proctored CBTF reservations, and a self-hosted course webpage for project milestones.
+      </p>
+      <p>
+        Keeping track of due dates manually leads to missed assignments, calendar clutter, and unnecessary stress. <strong>PrairieRun</strong> solves this problem by bringing all your deadlines together into one clean, consolidated, automatically-synced schedule.
+      </p>
+
+      <h2>How It Works</h2>
+      <p>
+        PrairieRun operates seamlessly as a browser extension:
+      </p>
+      <ol>
+        <li><strong>Automatic Extraction</strong>: When you browse your course portals, PrairieRun scans enrolled courses and upcoming assignments using your existing authenticated session.</li>
+        <li><strong>Normalization & Deduplication</strong>: Deadlines from different sources for the same class (like an assignment listed on both Gradescope and a course syllabus page) are unified into a single canonical entry.</li>
+        <li><strong>Calendar Synchronization</strong>: Eligible assignments are automatically published as calendar events—either directly to Google Calendar or through an anonymous, auto-updating iCal feed that works with Apple Calendar, Outlook, and Google Calendar.</li>
+      </ol>
+
+      <h2>Core Principles</h2>
+      <ul>
+        <li><strong>Zero Data Selling or Tracking</strong>: We do not collect telemetry, track browsing behavior, or monetize user data. All assignment parsing runs locally in your browser.</li>
+        <li><strong>Open Source & Auditable</strong>: Every line of code is open source and available for review on GitHub.</li>
+        <li><strong>No Setup Hassle</strong>: With our one-click iCal feed, students can subscribe to their calendar without registering developer credentials or navigating Google Cloud Console.</li>
+      </ul>
+
+      <h2>Get Involved</h2>
+      <p>
+        PrairieRun is community-maintained and welcomes contributions, bug reports, and suggestions. Visit our
+        <a href="https://github.com/t-goel/PrairieRun" target="_blank" rel="noreferrer">GitHub repository</a> to view the source code or get involved.
+      </p>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div>
+        <strong>PrairieRun</strong> — Open-source university academic tool.
+      </div>
+      <div class="footer-links">
+        <a href="/">Home</a>
+        <a href="/about">About</a>
+        <a href="/privacy">Privacy Policy</a>
+        <a href="/terms">Terms</a>
+        <a href="https://github.com/t-goel/PrairieRun" target="_blank" rel="noreferrer">GitHub</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
