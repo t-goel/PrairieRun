@@ -262,7 +262,31 @@
     toHostPermissionPatterns,
     runtimeSendMessage: (message) => callAsync(ext.runtime, "sendMessage", message),
     identityGetRedirectURL: (path) => ext.identity.getRedirectURL(path),
-    identityLaunchWebAuthFlow: (details) => callAsync(ext.identity, "launchWebAuthFlow", details),
+    // Chrome only allows one identity.launchWebAuthFlow at a time. Calendar
+    // Sign in runs in the background; feed auth used to run in the options
+    // page. Page contexts proxy here so both share the background mutex.
+    identityLaunchWebAuthFlow: (() => {
+      let chain = Promise.resolve();
+      const localLaunch = (details) => callAsync(ext.identity, "launchWebAuthFlow", details);
+      const launch = (details) => {
+        if (globalThis.__PRAIRIERUN_AUTH_HOST) return localLaunch(details);
+        return callAsync(ext.runtime, "sendMessage", {
+          type: "PRAIRIERUN_LAUNCH_WEB_AUTH_FLOW",
+          details,
+        }).then((response) => {
+          if (!response?.ok) {
+            throw new Error(response?.error || "Web authentication flow failed.");
+          }
+          return response.responseUrl;
+        });
+      };
+      return (details) => {
+        const run = () => launch(details);
+        const next = chain.then(run, run);
+        chain = next.then(() => undefined, () => undefined);
+        return next;
+      };
+    })(),
     addRuntimeMessageListener: (listener) => ext.runtime.onMessage.addListener(listener),
     // Toolbar button click (only fires when no default_popup is declared).
     addActionClickedListener: (listener) => {
@@ -274,10 +298,25 @@
       return Promise.resolve();
     },
     addStorageChangedListener: (listener) => ext.storage.onChanged.addListener(listener),
+    storageOnChanged: (listener) => ext.storage.onChanged.addListener(listener),
     addStartupListener: (listener) => ext?.runtime?.onStartup?.addListener(listener),
     addInstalledListener: (listener) => ext?.runtime?.onInstalled?.addListener(listener),
     offscreenEnsure,
-    tabsCreateForeground: (url) => callAsync(ext.tabs, "create", { url, active: true }),
+    // Resolve extension-relative paths (e.g. "options.html") so Helium/Brave
+    // never open a bare chrome-extension://<id> origin that their filters block.
+    tabsCreateForeground: (url) => {
+      const target = typeof url === "string" && url.length && !/^[a-z][a-z0-9+.-]*:/i.test(url)
+        ? (ext.runtime?.getURL?.(url) || url)
+        : url;
+      return callAsync(ext.tabs, "create", { url: target, active: true });
+    },
+    openOptionsPage: () => {
+      if (typeof ext.runtime?.openOptionsPage === "function") {
+        return callAsync(ext.runtime, "openOptionsPage");
+      }
+      const fallback = ext.runtime?.getURL?.("options.html") || "options.html";
+      return callAsync(ext.tabs, "create", { url: fallback, active: true });
+    },
     alarmsCreate: (name, info) => ext.alarms ? callAsync(ext.alarms, "create", name, info) : Promise.reject(new Error("Extension alarms API is unavailable.")),
     addAlarmsListener: (listener) => ext.alarms?.onAlarm?.addListener(listener),
     addTabsUpdatedListener: (listener) => ext.tabs.onUpdated.addListener(listener),

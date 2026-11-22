@@ -170,17 +170,13 @@ test("selectDigestItems filters out removedDeadlines", () => {
   assert.equal(selected[0].id, "keep-1");
 });
 
-test("selectDigestItems filters out items matching keywordFilters", () => {
-  const now = new Date("2026-11-10T18:00:00Z");
-  const keep = item({ id: "hw1", title: "Homework 1", dueAt: "2026-11-12T06:00:00Z" });
-  const drop1 = item({ id: "oh", title: "CS 425 Office Hours with TA", dueAt: "2026-11-12T06:00:00Z" });
-  const drop2 = item({ id: "disc", title: "Discussion Section 4", dueAt: "2026-11-12T06:00:00Z" });
-  const selected = digest.selectDigestItems([keep, drop1, drop2], {
-    now,
-    keywordFilters: ["office hours", "discussion"],
-  });
-  assert.equal(selected.length, 1);
-  assert.equal(selected[0].id, "hw1");
+test("renderRow reflects isExcluded with prr-digest-row--excluded and prr-digest-row--calendar-hidden", () => {
+  const { document } = require("linkedom").parseHTML("<!doctype html><html><body></body></html>");
+  globalThis.document = document;
+  const rowItem = item({ id: "hw4", title: "HW 4", dueAt: "2026-11-12T06:00:00Z" });
+  const row = digest.renderRow(rowItem, null, { isExcluded: true, isCalendarHidden: true });
+  assert.ok(row.classList.contains("prr-digest-row--excluded"));
+  assert.ok(row.classList.contains("prr-digest-row--calendar-hidden"));
 });
 
 test("renderRow builds action buttons with hide-from-calendar and remove controls", () => {

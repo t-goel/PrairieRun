@@ -16,9 +16,14 @@
   function matchesKeywords(title, keywords) {
     if (!title || !Array.isArray(keywords) || !keywords.length) return false;
     const lower = String(title).toLowerCase();
+    const alpha = lower.replace(/[^a-z0-9]/g, "");
     return keywords.some((kw) => {
       const k = String(kw || "").toLowerCase().trim();
-      return k && lower.includes(k);
+      if (!k) return false;
+      if (lower.includes(k)) return true;
+      const kAlpha = k.replace(/[^a-z0-9]/g, "");
+      if (kAlpha.length >= 2 && alpha.includes(kAlpha)) return true;
+      return false;
     });
   }
 
@@ -58,6 +63,27 @@
       console.error("Failed to save keyword filters", error);
     }
     return clean;
+  }
+
+  function dispatchFiltersChanged(keywords) {
+    if (typeof document === "undefined" || typeof document.dispatchEvent !== "function") return;
+    try {
+      if (typeof window !== "undefined" && typeof window.CustomEvent === "function") {
+        document.dispatchEvent(new window.CustomEvent("prairierun-filters-changed", { detail: { keywords } }));
+        return;
+      }
+      if (document.defaultView && typeof document.defaultView.CustomEvent === "function") {
+        document.dispatchEvent(new document.defaultView.CustomEvent("prairierun-filters-changed", { detail: { keywords } }));
+        return;
+      }
+      const ev = document.createEvent ? document.createEvent("Event") : null;
+      if (ev && ev.initEvent) {
+        ev.initEvent("prairierun-filters-changed", true, true);
+        document.dispatchEvent(ev);
+      }
+    } catch {
+      /* best effort */
+    }
   }
 
   function createChip(keyword, onRemove) {
@@ -105,8 +131,9 @@
       for (const kw of currentKeywords) {
         const chip = createChip(kw, async (removedKw) => {
           currentKeywords = currentKeywords.filter((k) => k.toLowerCase() !== removedKw.toLowerCase());
-          await saveKeywords(currentKeywords);
           render();
+          dispatchFiltersChanged(currentKeywords);
+          await saveKeywords(currentKeywords);
           input.focus();
         });
         list.appendChild(chip);
@@ -124,15 +151,17 @@
     input.addEventListener("keydown", async (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
+        event.stopPropagation();
         const raw = input.value.trim();
+        input.value = "";
         if (!raw) return;
         const exists = currentKeywords.some((k) => k.toLowerCase() === raw.toLowerCase());
         if (!exists) {
           currentKeywords.push(raw);
-          await saveKeywords(currentKeywords);
           render();
+          dispatchFiltersChanged(currentKeywords);
+          await saveKeywords(currentKeywords);
         }
-        input.value = "";
         return;
       }
 
@@ -141,9 +170,17 @@
         if (hasNoText && currentKeywords.length > 0) {
           event.preventDefault();
           currentKeywords.pop();
-          await saveKeywords(currentKeywords);
           render();
+          dispatchFiltersChanged(currentKeywords);
+          await saveKeywords(currentKeywords);
         }
+      }
+    });
+
+    input.addEventListener("keyup", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        input.value = "";
       }
     });
 

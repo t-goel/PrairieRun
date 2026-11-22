@@ -168,14 +168,19 @@
   function matchesKeywords(title, keywords) {
     if (!title || !Array.isArray(keywords) || !keywords.length) return false;
     const lower = String(title).toLowerCase();
+    const alpha = lower.replace(/[^a-z0-9]/g, "");
     return keywords.some((kw) => {
       const k = String(kw || "").toLowerCase().trim();
-      return k && lower.includes(k);
+      if (!k) return false;
+      if (lower.includes(k)) return true;
+      const kAlpha = k.replace(/[^a-z0-9]/g, "");
+      if (kAlpha.length >= 2 && alpha.includes(kAlpha)) return true;
+      return false;
     });
   }
 
   // Pure helper: next dated, incomplete items within the window, capped.
-  function selectDigestItems(items, { now = new Date(), limit = DEFAULT_LIMIT, windowDays = DEFAULT_WINDOW_DAYS, links = null, removedDeadlines = [], keywordFilters = [] } = {}) {
+  function selectDigestItems(items, { now = new Date(), limit = DEFAULT_LIMIT, windowDays = DEFAULT_WINDOW_DAYS, links = null, removedDeadlines = [] } = {}) {
     const start = now instanceof Date ? now.getTime() : Date.parse(now);
     const end = windowDays != null ? start + Math.max(0, Number(windowDays) || 0) * 24 * 60 * 60 * 1000 : Infinity;
     const removedSet = new Set(removedDeadlines || []);
@@ -183,8 +188,6 @@
     for (const item of items || []) {
       if (!item || isCompleted(item)) continue;
       if (item.id && (removedSet.has(item.id) || (item.aliases || []).some((a) => removedSet.has(a)))) continue;
-      const title = String(item.title || item.name || "");
-      if (matchesKeywords(title, keywordFilters)) continue;
       const t = dueMs(item);
       if (t === null) continue;
       // Include anything due later today through the window; drop fully past.
@@ -213,9 +216,9 @@
   }
 
   function renderRow(item, links = null, options = {}) {
-    const { isCalendarHidden = false, onToggleHide = null, onRemove = null } = options;
+    const { isCalendarHidden = false, isExcluded = false, onToggleHide = null, onRemove = null } = options;
     const row = make("li", {
-      className: `prr-digest-row${isCalendarHidden ? " prr-digest-row--calendar-hidden" : ""}`,
+      className: `prr-digest-row${(isCalendarHidden || isExcluded) ? " prr-digest-row--calendar-hidden" : ""}${isExcluded ? " prr-digest-row--excluded" : ""}`,
     });
     row.append(make("span", { className: "prr-digest-badge" }, sourceBadge(item)));
     const course = courseLabel(item, links);
@@ -390,16 +393,18 @@
         root.append(make("p", { className: "muted" }, error?.message || "Could not load digest."));
         return;
       }
-      const selected = selectDigestItems(items, { links, removedDeadlines, keywordFilters });
+      const selected = selectDigestItems(items, { links, removedDeadlines });
       if (!selected.length) {
         root.append(make("p", { className: "muted" }, "Nothing upcoming."));
         return;
       }
       const list = make("ul", { className: "prr-digest-list" });
       for (const item of selected) {
-        const isCalendarHidden = hiddenCalendarSet.has(item.id) || (item.aliases || []).some((a) => hiddenCalendarSet.has(a));
+        const isKeywordExcluded = matchesKeywords(item.title, keywordFilters) || matchesKeywords(item.name, keywordFilters);
+        const isCalendarHidden = isKeywordExcluded || hiddenCalendarSet.has(item.id) || (item.aliases || []).some((a) => hiddenCalendarSet.has(a));
         list.append(renderRow(item, links, {
           isCalendarHidden,
+          isExcluded: isKeywordExcluded,
           onToggleHide: handleToggleHide,
           onRemove: handleRemove,
         }));
@@ -409,7 +414,7 @@
 
     await refresh();
     try {
-      globalThis.PrairieRunExt?.storageOnChanged?.((changes, area) => {
+      const onStorageChange = (changes, area) => {
         if (area && area !== "local") return;
         if (
           changes[DEADLINES_KEY] ||
@@ -422,7 +427,16 @@
         ) {
           refresh();
         }
-      });
+      };
+      if (typeof globalThis.PrairieRunExt?.addStorageChangedListener === "function") {
+        globalThis.PrairieRunExt.addStorageChangedListener(onStorageChange);
+      }
+      if (typeof globalThis.PrairieRunExt?.storageOnChanged === "function") {
+        globalThis.PrairieRunExt.storageOnChanged(onStorageChange);
+      }
+      if (typeof document !== "undefined") {
+        document.addEventListener("prairierun-filters-changed", () => refresh());
+      }
     } catch { /* ignore */ }
   }
 

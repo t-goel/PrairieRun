@@ -215,7 +215,13 @@ async function loadGoogleCalendarExportItems() {
   const matchesKeyword = (title) => {
     if (!title || !keywordFilters.length) return false;
     const lower = String(title).toLowerCase();
-    return keywordFilters.some((kw) => lower.includes(kw));
+    const alpha = lower.replace(/[^a-z0-9]/g, "");
+    return keywordFilters.some((kw) => {
+      if (!kw) return false;
+      if (lower.includes(kw)) return true;
+      const kwAlpha = kw.replace(/[^a-z0-9]/g, "");
+      return kwAlpha.length >= 2 && alpha.includes(kwAlpha);
+    });
   };
 
   const isExcluded = (item) => {
@@ -706,7 +712,13 @@ PrairieRunExt.addRuntimeMessageListener((message, sender, sendResponse) => {
         const matchesKeyword = (title) => {
           if (!title || !keywordFilters.length) return false;
           const lower = String(title).toLowerCase();
-          return keywordFilters.some((kw) => lower.includes(kw));
+          const alpha = lower.replace(/[^a-z0-9]/g, "");
+          return keywordFilters.some((kw) => {
+            if (!kw) return false;
+            if (lower.includes(kw)) return true;
+            const kwAlpha = kw.replace(/[^a-z0-9]/g, "");
+            return kwAlpha.length >= 2 && alpha.includes(kwAlpha);
+          });
         };
 
         const deadlines = Array.isArray(stored.prairierunDeadlines) ? stored.prairierunDeadlines : [];

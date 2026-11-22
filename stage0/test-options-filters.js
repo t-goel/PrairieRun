@@ -30,10 +30,12 @@ function setupDOM() {
   return { document: dom.document, triggerKey };
 }
 
-test("matchesKeywords performs case-insensitive substring matching", () => {
+test("matchesKeywords performs case-insensitive substring and alphanumeric matching", () => {
   assert.equal(filters.matchesKeywords("CS 425 Office Hours with TA", ["office hours"]), true);
   assert.equal(filters.matchesKeywords("CS 425 OFFICE HOURS", ["office hours"]), true);
   assert.equal(filters.matchesKeywords("Discussion Section 01", ["discussion", "quiz"]), true);
+  assert.equal(filters.matchesKeywords("HW 4", ["hw4"]), true);
+  assert.equal(filters.matchesKeywords("HW4", ["hw 4"]), true);
   assert.equal(filters.matchesKeywords("Homework 1", ["office hours"]), false);
   assert.equal(filters.matchesKeywords("", ["office hours"]), false);
   assert.equal(filters.matchesKeywords(null, ["office hours"]), false);

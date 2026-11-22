@@ -93,7 +93,13 @@
       const matchesKeyword = (title) => {
         if (!title || !keywordFilters.length) return false;
         const lower = String(title).toLowerCase();
-        return keywordFilters.some((kw) => lower.includes(kw));
+        const alpha = lower.replace(/[^a-z0-9]/g, "");
+        return keywordFilters.some((kw) => {
+          if (!kw) return false;
+          if (lower.includes(kw)) return true;
+          const kwAlpha = kw.replace(/[^a-z0-9]/g, "");
+          return kwAlpha.length >= 2 && alpha.includes(kwAlpha);
+        });
       };
 
       if (!hidden.size && !removed.size && !keywordFilters.length) return items || [];

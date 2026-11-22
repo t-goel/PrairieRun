@@ -675,12 +675,14 @@ async function exportAssignmentsNow(assignments) {
 async function removeAssignmentEventOnce(assignment) {
   const stored = await PrairieRunExt.storageLocalGet([CALENDAR_MAPPINGS_KEY, CALENDAR_SYNC_KEY]);
   const sync = stored[CALENDAR_SYNC_KEY] || {};
-  const mapping = sync[assignment.id];
+  const candidateIds = [assignment.id, ...(assignment.aliases || [])].filter(Boolean);
+  const targetId = candidateIds.find((id) => sync[id]?.calendarId) || assignment.id;
+  const mapping = sync[targetId];
   if (!mapping?.calendarId) return { status: "skipped", assignment };
   const token = await getCalendarToken();
   const events = await findMarkedEvents(assignment, mapping.calendarId, token);
   for (const event of events) await calendarRequest(`/calendars/${encodeURIComponent(mapping.calendarId)}/events/${encodeURIComponent(event.id)}`, { method: "DELETE" }, token);
-  delete sync[assignment.id];
+  for (const id of candidateIds) delete sync[id];
   await PrairieRunExt.storageLocalSet({ [CALENDAR_SYNC_KEY]: sync });
   return { status: events.length ? "removed" : "skipped", assignment, eventId: events[0]?.id };
 }

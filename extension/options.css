@@ -402,11 +402,12 @@ button.sync-now { width: auto; padding: 7px 10px; font-size: 11px; }
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
+  padding: 5px 8px;
   border: 2px solid var(--ink);
   background: var(--paper);
   box-shadow: 2px 2px 0 var(--ink);
-  min-height: 40px;
+  min-height: 36px;
+  box-sizing: border-box;
   cursor: text;
   margin-top: 4px;
 }
@@ -420,57 +421,71 @@ button.sync-now { width: auto; padding: 7px 10px; font-size: 11px; }
 .prr-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 6px 3px 8px;
+  gap: 5px;
+  padding: 0 5px 0 7px;
+  height: 22px;
+  line-height: 22px;
+  box-sizing: border-box;
   background: var(--wash);
-  border: 2px solid var(--ink);
-  box-shadow: 2px 2px 0 var(--ink);
+  border: 1.5px solid var(--ink);
+  box-shadow: 1.5px 1.5px 0 var(--ink);
   font-family: var(--mono);
   font-size: 11px;
   font-weight: 800;
   color: var(--ink);
-  line-height: 1.2;
   user-select: none;
-  max-width: 100%;
+  vertical-align: middle;
 }
 .prr-chip-text {
+  display: inline-block;
+  line-height: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.prr-chip-remove {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  margin: 0;
+.card .prr-chip-box button.prr-chip-remove,
+.prr-chip-box button.prr-chip-remove,
+.prr-chip button.prr-chip-remove {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 13px !important;
+  height: 13px !important;
+  min-width: 13px !important;
+  max-width: 13px !important;
+  padding: 0 !important;
+  margin: 0 !important;
   border: 1px solid var(--ink) !important;
   border-radius: 0 !important;
   background: var(--paper) !important;
   color: var(--ink) !important;
   font-family: var(--mono) !important;
-  font-size: 12px !important;
+  font-size: 10px !important;
   font-weight: 900 !important;
   line-height: 1 !important;
-  cursor: pointer;
-  box-shadow: 1px 1px 0 var(--ink) !important;
-  flex-shrink: 0;
+  cursor: pointer !important;
+  box-shadow: none !important;
+  transform: none !important;
+  flex-shrink: 0 !important;
 }
-.prr-chip-remove:hover {
+.card .prr-chip-box button.prr-chip-remove:hover,
+.prr-chip button.prr-chip-remove:hover {
   background: var(--accent) !important;
   color: #fff !important;
   border-color: var(--ink) !important;
+  transform: none !important;
+  box-shadow: none !important;
 }
 .prr-chip-input {
   flex: 1 1 140px;
   min-width: 120px;
+  height: 24px;
+  line-height: 24px;
   border: none !important;
   box-shadow: none !important;
   outline: none !important;
   background: transparent !important;
-  padding: 4px 4px !important;
+  padding: 0 4px !important;
   margin: 0 !important;
   font-family: var(--mono);
   font-size: 12px;
@@ -490,7 +505,7 @@ button.sync-now { width: auto; padding: 7px 10px; font-size: 11px; }
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  padding: 10px 0;
+  padding: 7px 0;
   border-top: 2px solid var(--ink);
 }
 .sources-list > li:first-child .source-row { border-top: 0; padding-top: 2px; }
@@ -525,14 +540,26 @@ button.sync-now { width: auto; padding: 7px 10px; font-size: 11px; }
   background: var(--paper);
 }
 
-.source-info { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.source-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
 .source-label {
   font-size: 13px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: .03em;
+  white-space: nowrap;
 }
-.source-checked { font-size: 11px; color: #444; }
+.source-checked {
+  font-size: 11px;
+  color: #444;
+  white-space: nowrap;
+}
 
 .chip {
   flex-shrink: 0;
@@ -828,6 +855,10 @@ span.prr-digest-title { text-decoration: none; }
 .prr-digest-row--calendar-hidden .prr-digest-due {
   text-decoration: line-through;
   opacity: 0.65;
+}
+.prr-digest-row--excluded {
+  opacity: 0.45;
+  transition: opacity .15s ease;
 }
 @media (max-width: 760px) {
   .prr-digest-row {
