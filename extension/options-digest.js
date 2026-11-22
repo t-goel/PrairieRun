@@ -220,6 +220,8 @@
     const row = make("li", {
       className: `prr-digest-row${(isCalendarHidden || isExcluded) ? " prr-digest-row--calendar-hidden" : ""}${isExcluded ? " prr-digest-row--excluded" : ""}`,
     });
+    if (item?.id) row.dataset.id = item.id;
+    row._item = item;
     row.append(make("span", { className: "prr-digest-badge" }, sourceBadge(item)));
     const course = courseLabel(item, links);
     if (course) row.append(make("span", { className: "prr-digest-course" }, course));
@@ -252,7 +254,7 @@
     if (typeof onToggleHide === "function") {
       hideBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        onToggleHide(item);
+        onToggleHide(item, hideBtn, row);
       });
     }
     actions.append(hideBtn);
@@ -268,7 +270,7 @@
     if (typeof onRemove === "function") {
       removeBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        onRemove(item);
+        onRemove(item, row);
       });
     }
     actions.append(removeBtn);
@@ -308,25 +310,97 @@
       section.append(root);
     }
 
-    async function handleToggleHide(item) {
-      if (!item?.id) return;
-      const stored = await globalThis.PrairieRunExt.storageLocalGet(HIDDEN_CALENDAR_KEY);
-      const current = Array.isArray(stored[HIDDEN_CALENDAR_KEY]) ? [...stored[HIDDEN_CALENDAR_KEY]] : [];
-      const index = current.indexOf(item.id);
-      const isHiding = index === -1;
-      if (isHiding) {
-        current.push(item.id);
-        for (const alias of item.aliases || []) {
-          if (!current.includes(alias)) current.push(alias);
-        }
+    let hiddenCalendarSet = new Set();
+    let lastKeywords = [];
+    let refreshTimer = null;
+
+    function setContent(container, ...nodes) {
+      if (typeof container.replaceChildren === "function") {
+        container.replaceChildren(...nodes);
       } else {
-        current.splice(index, 1);
-        for (const alias of item.aliases || []) {
-          const ai = current.indexOf(alias);
-          if (ai !== -1) current.splice(ai, 1);
+        container.textContent = "";
+        container.append(...nodes);
+      }
+    }
+
+    function scheduleRefresh(delay = 50) {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        refresh();
+      }, delay);
+    }
+
+    function updateFiltersInPlace(keywords) {
+      if (Array.isArray(keywords)) {
+        lastKeywords = keywords;
+      }
+      const rows = root.querySelectorAll(".prr-digest-row");
+      if (!rows.length) return false;
+      for (const row of rows) {
+        const item = row._item;
+        if (!item) continue;
+        const isKeywordExcluded = matchesKeywords(item.title, lastKeywords) || matchesKeywords(item.name, lastKeywords);
+        const isExplicitlyHidden = hiddenCalendarSet.has(item.id) || (item.aliases || []).some((a) => hiddenCalendarSet.has(a));
+        const isCalendarHidden = isKeywordExcluded || isExplicitlyHidden;
+        row.classList.toggle("prr-digest-row--excluded", isKeywordExcluded);
+        row.classList.toggle("prr-digest-row--calendar-hidden", isCalendarHidden);
+        const hideBtn = row.querySelector(".prr-digest-action-hide");
+        if (hideBtn) {
+          hideBtn.classList.toggle("prr-digest-action-btn--active", isCalendarHidden);
+          hideBtn.title = isCalendarHidden ? "Unhide from calendar" : "Hide from calendar";
+          hideBtn.setAttribute("aria-label", hideBtn.title);
+          hideBtn.setAttribute("aria-pressed", isCalendarHidden ? "true" : "false");
         }
       }
-      await globalThis.PrairieRunExt.storageLocalSet({ [HIDDEN_CALENDAR_KEY]: current });
+      return true;
+    }
+
+    async function handleToggleHide(item, hideBtn, row) {
+      if (!item?.id) return;
+      const targetRow = row || (item.id ? root.querySelector(`li[data-id="${item.id}"]`) : null);
+      const targetBtn = hideBtn || targetRow?.querySelector?.(".prr-digest-action-hide");
+
+      const isCurrentlyActive = targetBtn ? targetBtn.classList.contains("prr-digest-action-btn--active") : false;
+      const isHiding = !isCurrentlyActive;
+
+      // 1. Immediately update UI in-place (smooth fade, no flash, no layout shift)
+      if (isHiding) {
+        hiddenCalendarSet.add(item.id);
+        for (const alias of item.aliases || []) hiddenCalendarSet.add(alias);
+      } else {
+        hiddenCalendarSet.delete(item.id);
+        for (const alias of item.aliases || []) hiddenCalendarSet.delete(alias);
+      }
+      if (targetBtn) {
+        targetBtn.classList.toggle("prr-digest-action-btn--active", isHiding);
+        targetBtn.title = isHiding ? "Unhide from calendar" : "Hide from calendar";
+        targetBtn.setAttribute("aria-label", targetBtn.title);
+        targetBtn.setAttribute("aria-pressed", isHiding ? "true" : "false");
+      }
+      if (targetRow) {
+        targetRow.classList.toggle("prr-digest-row--calendar-hidden", isHiding || targetRow.classList.contains("prr-digest-row--excluded"));
+      }
+
+      // 2. Persist in background
+      try {
+        const stored = await globalThis.PrairieRunExt.storageLocalGet(HIDDEN_CALENDAR_KEY);
+        const current = Array.isArray(stored[HIDDEN_CALENDAR_KEY]) ? [...stored[HIDDEN_CALENDAR_KEY]] : [];
+        const index = current.indexOf(item.id);
+        if (isHiding) {
+          if (index === -1) current.push(item.id);
+          for (const alias of item.aliases || []) {
+            if (!current.includes(alias)) current.push(alias);
+          }
+        } else {
+          if (index !== -1) current.splice(index, 1);
+          for (const alias of item.aliases || []) {
+            const ai = current.indexOf(alias);
+            if (ai !== -1) current.splice(ai, 1);
+          }
+        }
+        await globalThis.PrairieRunExt.storageLocalSet({ [HIDDEN_CALENDAR_KEY]: current });
+      } catch { /* best effort */ }
 
       try {
         await globalThis.PrairieRunExt.runtimeSendMessage?.({
@@ -335,35 +409,43 @@
           hidden: isHiding,
         });
       } catch { /* best effort */ }
-
-      await refresh();
     }
 
-    async function handleRemove(item) {
+    async function handleRemove(item, row) {
       if (!item?.id) return;
-      const stored = await globalThis.PrairieRunExt.storageLocalGet([
-        REMOVED_DEADLINES_KEY,
-        DEADLINES_KEY,
-        ASSIGNMENTS_KEY,
-      ]);
-      const currentRemoved = Array.isArray(stored[REMOVED_DEADLINES_KEY]) ? [...stored[REMOVED_DEADLINES_KEY]] : [];
-      if (!currentRemoved.includes(item.id)) currentRemoved.push(item.id);
-      for (const alias of item.aliases || []) {
-        if (!currentRemoved.includes(alias)) currentRemoved.push(alias);
+      const targetRow = row || (item.id ? root.querySelector(`li[data-id="${item.id}"]`) : null);
+      if (targetRow) {
+        targetRow.remove();
+        if (!root.querySelector(".prr-digest-row")) {
+          setContent(root, make("p", { className: "muted" }, "Nothing upcoming."));
+        }
       }
 
-      const currentDeadlines = Array.isArray(stored[DEADLINES_KEY])
-        ? stored[DEADLINES_KEY].filter((d) => d.id !== item.id && !(item.aliases || []).includes(d.id))
-        : [];
-      const currentAssignments = Array.isArray(stored[ASSIGNMENTS_KEY])
-        ? stored[ASSIGNMENTS_KEY].filter((a) => a.id !== item.id && !(item.aliases || []).includes(a.id))
-        : [];
+      try {
+        const stored = await globalThis.PrairieRunExt.storageLocalGet([
+          REMOVED_DEADLINES_KEY,
+          DEADLINES_KEY,
+          ASSIGNMENTS_KEY,
+        ]);
+        const currentRemoved = Array.isArray(stored[REMOVED_DEADLINES_KEY]) ? [...stored[REMOVED_DEADLINES_KEY]] : [];
+        if (!currentRemoved.includes(item.id)) currentRemoved.push(item.id);
+        for (const alias of item.aliases || []) {
+          if (!currentRemoved.includes(alias)) currentRemoved.push(alias);
+        }
 
-      await globalThis.PrairieRunExt.storageLocalSet({
-        [REMOVED_DEADLINES_KEY]: currentRemoved,
-        [DEADLINES_KEY]: currentDeadlines,
-        [ASSIGNMENTS_KEY]: currentAssignments,
-      });
+        const currentDeadlines = Array.isArray(stored[DEADLINES_KEY])
+          ? stored[DEADLINES_KEY].filter((d) => d.id !== item.id && !(item.aliases || []).includes(d.id))
+          : [];
+        const currentAssignments = Array.isArray(stored[ASSIGNMENTS_KEY])
+          ? stored[ASSIGNMENTS_KEY].filter((a) => a.id !== item.id && !(item.aliases || []).includes(a.id))
+          : [];
+
+        await globalThis.PrairieRunExt.storageLocalSet({
+          [REMOVED_DEADLINES_KEY]: currentRemoved,
+          [DEADLINES_KEY]: currentDeadlines,
+          [ASSIGNMENTS_KEY]: currentAssignments,
+        });
+      } catch { /* best effort */ }
 
       try {
         await globalThis.PrairieRunExt.runtimeSendMessage?.({
@@ -371,71 +453,88 @@
           item,
         });
       } catch { /* best effort */ }
-
-      await refresh();
     }
 
     async function refresh() {
-      root.textContent = "";
+      // NOTE: Do NOT clear root before loadData! Clearing early causes empty-space flash and page layout shifts.
       let items = [];
       let links = {};
-      let hiddenCalendarSet = new Set();
       let removedDeadlines = [];
-      let keywordFilters = [];
       try {
         const data = await loadData();
         items = data.items;
         links = data.links;
         hiddenCalendarSet = new Set(data.hiddenCalendar || []);
         removedDeadlines = data.removedDeadlines || [];
-        keywordFilters = data.keywordFilters || [];
+        lastKeywords = data.keywordFilters || [];
       } catch (error) {
-        root.append(make("p", { className: "muted" }, error?.message || "Could not load digest."));
+        setContent(root, make("p", { className: "muted" }, error?.message || "Could not load digest."));
         return;
       }
       const selected = selectDigestItems(items, { links, removedDeadlines });
       if (!selected.length) {
-        root.append(make("p", { className: "muted" }, "Nothing upcoming."));
+        setContent(root, make("p", { className: "muted" }, "Nothing upcoming."));
         return;
       }
       const list = make("ul", { className: "prr-digest-list" });
       for (const item of selected) {
-        const isKeywordExcluded = matchesKeywords(item.title, keywordFilters) || matchesKeywords(item.name, keywordFilters);
+        const isKeywordExcluded = matchesKeywords(item.title, lastKeywords) || matchesKeywords(item.name, lastKeywords);
         const isCalendarHidden = isKeywordExcluded || hiddenCalendarSet.has(item.id) || (item.aliases || []).some((a) => hiddenCalendarSet.has(a));
-        list.append(renderRow(item, links, {
+        const rendered = renderRow(item, links, {
           isCalendarHidden,
           isExcluded: isKeywordExcluded,
           onToggleHide: handleToggleHide,
           onRemove: handleRemove,
-        }));
+        });
+        list.append(rendered);
       }
-      root.append(list);
+      setContent(root, list);
     }
 
     await refresh();
     try {
       const onStorageChange = (changes, area) => {
         if (area && area !== "local") return;
+        if (changes[KEYWORD_FILTERS_KEY] || changes[SETTINGS_KEY]) {
+          const kf = changes[KEYWORD_FILTERS_KEY]?.newValue || changes[SETTINGS_KEY]?.newValue?.keywordFilters;
+          if (Array.isArray(kf)) {
+            updateFiltersInPlace(kf);
+            return;
+          }
+        }
+        if (changes[HIDDEN_CALENDAR_KEY]) {
+          const hc = changes[HIDDEN_CALENDAR_KEY]?.newValue;
+          if (Array.isArray(hc)) {
+            hiddenCalendarSet = new Set(hc);
+            updateFiltersInPlace(lastKeywords);
+            return;
+          }
+        }
         if (
           changes[DEADLINES_KEY] ||
           changes[ASSIGNMENTS_KEY] ||
           changes[LINKS_KEY] ||
-          changes[HIDDEN_CALENDAR_KEY] ||
-          changes[REMOVED_DEADLINES_KEY] ||
-          changes[KEYWORD_FILTERS_KEY] ||
-          changes[SETTINGS_KEY]
+          changes[REMOVED_DEADLINES_KEY]
         ) {
-          refresh();
+          scheduleRefresh(50);
         }
       };
+
       if (typeof globalThis.PrairieRunExt?.addStorageChangedListener === "function") {
         globalThis.PrairieRunExt.addStorageChangedListener(onStorageChange);
-      }
-      if (typeof globalThis.PrairieRunExt?.storageOnChanged === "function") {
+      } else if (typeof globalThis.PrairieRunExt?.storageOnChanged === "function") {
         globalThis.PrairieRunExt.storageOnChanged(onStorageChange);
       }
+
       if (typeof document !== "undefined") {
-        document.addEventListener("prairierun-filters-changed", () => refresh());
+        document.addEventListener("prairierun-filters-changed", (e) => {
+          const keywords = e?.detail?.keywords;
+          if (Array.isArray(keywords)) {
+            updateFiltersInPlace(keywords);
+          } else {
+            scheduleRefresh(30);
+          }
+        });
       }
     } catch { /* ignore */ }
   }

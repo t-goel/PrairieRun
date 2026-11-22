@@ -376,8 +376,26 @@
     }
     const store = globalThis.PrairieRunDeadlineStore;
 
+    function setContent(container, ...nodes) {
+      if (typeof container.replaceChildren === "function") {
+        container.replaceChildren(...nodes);
+      } else {
+        container.textContent = "";
+        container.append(...nodes);
+      }
+    }
+
+    let refreshTimer = null;
+    function scheduleRefresh(delay = 50) {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        refresh();
+      }, delay);
+    }
+
     async function refresh() {
-      root.textContent = "";
+      // NOTE: Do NOT clear root.textContent before loadData()! That causes an empty-table flash while fetching.
       const { items, links, courses: enrolledCourses } = await loadData();
       const allEntities = [...items, ...(enrolledCourses || [])];
       const suggested = store.suggestCourseLinks(allEntities);
@@ -387,9 +405,9 @@
         const empty = document.createElement("p");
         empty.className = "muted";
         empty.textContent = "No courses seen yet. Sync a source first.";
-        root.append(empty);
+        setContent(root, empty);
       } else {
-        root.append(table);
+        setContent(root, table);
       }
     }
 
@@ -400,17 +418,18 @@
     try {
       await refresh();
     } catch (error) {
-      root.textContent = "";
       const failed = document.createElement("p");
       failed.className = "muted";
       failed.textContent = `Could not load course links: ${error?.message || error}`;
-      root.append(failed);
+      setContent(root, failed);
     }
 
     try {
       globalThis.PrairieRunExt?.storageOnChanged?.((changes, area) => {
         if (area && area !== "local") return;
-        if (changes[DEADLINES_KEY] || changes[LINKS_KEY] || changes[COURSES_KEY]) refresh();
+        if (changes[DEADLINES_KEY] || changes[LINKS_KEY] || changes[COURSES_KEY]) {
+          scheduleRefresh(50);
+        }
       });
     } catch { /* ignore */ }
   }

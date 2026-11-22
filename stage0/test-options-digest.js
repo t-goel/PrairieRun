@@ -223,3 +223,75 @@ test("renderRow reflects isCalendarHidden with active button and row class", () 
   assert.ok(hideBtn.classList.contains("prr-digest-action-btn--active"));
   assert.equal(hideBtn.getAttribute("aria-label"), "Unhide from calendar");
 });
+
+test("render handles in-place toggle and filter updates without recreating DOM nodes", async () => {
+  const { document, window } = require("linkedom").parseHTML("<!doctype html><html><body><div id='assignment-digest'></div></body></html>");
+  globalThis.document = document;
+  globalThis.window = window;
+
+  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const nextDay = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+
+  const storage = {
+    prairierunDeadlines: [
+      item({ id: "hw4", title: "HW4", dueAt: tomorrow, source: "gradescope" }),
+      item({ id: "mp4", title: "MP4", dueAt: nextDay, source: "gradescope" }),
+    ],
+    prairierunHiddenFromCalendar: [],
+    prairierunRemovedDeadlines: [],
+    prairierunKeywordFilters: [],
+  };
+
+  const listeners = [];
+  globalThis.PrairieRunExt = {
+    storageLocalGet: async (keys) => {
+      if (typeof keys === "string") return { [keys]: storage[keys] };
+      const out = {};
+      for (const k of keys) out[k] = storage[k];
+      return out;
+    },
+    storageLocalSet: async (obj) => {
+      Object.assign(storage, obj);
+    },
+    addStorageChangedListener: (fn) => listeners.push(fn),
+    storageOnChanged: (fn) => listeners.push(fn),
+    runtimeSendMessage: async () => {},
+  };
+
+  const section = document.getElementById("assignment-digest");
+  await digest.render(section);
+
+  const root = section.querySelector("[data-prr-digest]");
+  assert.ok(root);
+  const rows = root.querySelectorAll(".prr-digest-row");
+  assert.equal(rows.length, 2);
+
+  const hw4Row = rows[0];
+  const mp4Row = rows[1];
+
+  // 1. In-place toggle hide
+  const hw4HideBtn = hw4Row.querySelector(".prr-digest-action-hide");
+  hw4HideBtn.click();
+
+  // Button and row updated in place:
+  assert.ok(hw4HideBtn.classList.contains("prr-digest-action-btn--active"));
+  assert.ok(hw4Row.classList.contains("prr-digest-row--calendar-hidden"));
+  // DOM element identity preserved:
+  assert.equal(root.querySelectorAll(".prr-digest-row")[0], hw4Row);
+
+  // 2. In-place filter change event:
+  const filterEvt = new window.CustomEvent("prairierun-filters-changed", { detail: { keywords: ["mp4"] } });
+  document.dispatchEvent(filterEvt);
+
+  assert.ok(mp4Row.classList.contains("prr-digest-row--excluded"));
+  assert.ok(mp4Row.classList.contains("prr-digest-row--calendar-hidden"));
+  // Node identity is still preserved:
+  assert.equal(root.querySelectorAll(".prr-digest-row")[1], mp4Row);
+
+  // 3. In-place remove
+  const mp4RemoveBtn = mp4Row.querySelector(".prr-digest-action-remove");
+  mp4RemoveBtn.click();
+
+  assert.equal(root.querySelectorAll(".prr-digest-row").length, 1);
+  assert.equal(root.querySelectorAll(".prr-digest-row")[0], hw4Row);
+});
