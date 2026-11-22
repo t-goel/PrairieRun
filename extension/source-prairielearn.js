@@ -17,7 +17,28 @@
     label: "PrairieLearn",
     origins: ["https://us.prairielearn.com/*"],
     signInUrl: "https://us.prairielearn.com/pl",
-    parsers: {},
+    parsers: {
+      home(doc, url) {
+        if (typeof globalThis.PrairieLearnAdapter?.getCourseLinks === "function") {
+          return { courseLinks: globalThis.PrairieLearnAdapter.getCourseLinks(doc, { href: url || "https://us.prairielearn.com/pl" }) };
+        }
+        const seen = new Set();
+        const courseLinks = [...doc.querySelectorAll("a[href]")]
+          .map((a) => {
+            const href = a.getAttribute("href") || "";
+            const m = href.match(/\/course_instance\/(\d+)/i);
+            const id = m ? m[1] : null;
+            const fullHref = href.startsWith("http") ? href : `https://us.prairielearn.com${href}`;
+            return {
+              courseInstanceId: id,
+              href: fullHref,
+              text: (a.textContent || "").trim(),
+            };
+          })
+          .filter((l) => l.courseInstanceId && !seen.has(l.courseInstanceId) && seen.add(l.courseInstanceId));
+        return { courseLinks };
+      },
+    },
     isSignedOut(fetchResult) {
       if (!fetchResult) return false;
       const status = fetchResult.status;
@@ -25,7 +46,7 @@
       const text = String(fetchResult.text || "").toLowerCase();
       return text.includes("sign in") && text.includes("prairielearn");
     },
-    async sync() {
+    async sync(ctx) {
       const legacy = await readLegacyAssignments();
       const items = [];
       for (const entry of legacy) {
@@ -58,12 +79,39 @@
           url,
         });
       }
+      // If sync context is available, fetch the PrairieLearn home page to get all enrolled courses directly.
+      if (typeof ctx?.fetchPage === "function") {
+        try {
+          const resp = await ctx.fetchPage("https://us.prairielearn.com/pl");
+          if (resp && resp.ok && !adapter.isSignedOut(resp)) {
+            const parsed = typeof ctx?.parseHtml === "function"
+              ? await ctx.parseHtml("prairielearn.home", String(resp.text || ""), resp.url || "https://us.prairielearn.com/pl")
+              : null;
+            for (const link of (parsed?.courseLinks || [])) {
+              if (!link?.courseInstanceId) continue;
+              const key = `prairielearn:${link.courseInstanceId}`;
+              const store = globalThis.PrairieRunDeadlineStore;
+              const code = store?.normalizeCourseCode ? store.normalizeCourseCode(link.text) : null;
+              const url = `${link.href.replace(/\/$/, "")}/assessments`;
+              coursesByKey.set(key, {
+                id: link.courseInstanceId,
+                source: "prairielearn",
+                courseKey: key,
+                courseCode: code,
+                courseName: link.text,
+                url,
+              });
+            }
+          }
+        } catch { /* best-effort */ }
+      }
       try {
         const storedCourses = await globalThis.PrairieRunExt?.storageLocalGet?.("prairierunCourses");
         const savedCourses = Array.isArray(storedCourses?.prairierunCourses) ? storedCourses.prairierunCourses : [];
         for (const sc of savedCourses) {
-          if (sc?.source === "prairielearn" && sc?.courseKey && !coursesByKey.has(sc.courseKey)) {
-            coursesByKey.set(sc.courseKey, sc);
+          const key = sc?.courseKey || (sc?.id ? `prairielearn:${sc.id}` : null);
+          if (sc?.source === "prairielearn" && key && !coursesByKey.has(key)) {
+            coursesByKey.set(key, { ...sc, courseKey: key });
           }
         }
       } catch { /* best-effort */ }

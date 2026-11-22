@@ -92,10 +92,51 @@
         } catch { /* skip */ }
       }
     }
+    let courses = Array.isArray(stored[COURSES_KEY]) ? [...stored[COURSES_KEY]] : [];
+    // If running in browser and PrairieLearn enrolled courses aren't populated yet,
+    // fetch https://us.prairielearn.com/pl using the browser session.
+    try {
+      if (typeof fetch === "function" && typeof DOMParser !== "undefined") {
+        const hasPl = courses.some((c) => c?.source === "prairielearn" && c?.url);
+        if (!hasPl) {
+          const resp = await fetch("https://us.prairielearn.com/pl", { credentials: "include" });
+          if (resp && resp.ok) {
+            const html = await resp.text();
+            if (!html.toLowerCase().includes("sign in") || html.includes("course_instance")) {
+              const doc = new DOMParser().parseFromString(html, "text/html");
+              const seen = new Set();
+              const plFetched = [...doc.querySelectorAll("a[href]")]
+                .map((a) => {
+                  const href = a.getAttribute("href") || "";
+                  const m = href.match(/\/course_instance\/(\d+)/i);
+                  const id = m ? m[1] : null;
+                  const fullHref = href.startsWith("http") ? href : `https://us.prairielearn.com${href}`;
+                  return { id, href: fullHref, text: (a.textContent || "").trim() };
+                })
+                .filter((l) => l.id && !seen.has(l.id) && seen.add(l.id));
+              if (plFetched.length > 0) {
+                const store = globalThis.PrairieRunDeadlineStore;
+                const nonPl = courses.filter((c) => c?.source !== "prairielearn");
+                const newPl = plFetched.map((l) => ({
+                  id: l.id,
+                  source: "prairielearn",
+                  courseKey: `prairielearn:${l.id}`,
+                  courseCode: store?.normalizeCourseCode ? store.normalizeCourseCode(l.text) : null,
+                  courseName: l.text,
+                  url: `${l.href.replace(/\/$/, "")}/assessments`,
+                }));
+                courses = [...nonPl, ...newPl];
+                globalThis.PrairieRunExt?.storageLocalSet?.({ [COURSES_KEY]: courses }).catch(() => undefined);
+              }
+            }
+          }
+        }
+      }
+    } catch { /* best-effort */ }
     return {
       items,
       links: migrateStoredLinks(stored[LINKS_KEY] && typeof stored[LINKS_KEY] === "object" ? stored[LINKS_KEY] : {}),
-      courses: Array.isArray(stored[COURSES_KEY]) ? stored[COURSES_KEY] : [],
+      courses,
     };
   }
 
@@ -180,7 +221,7 @@
         : (code) => code === familyWant;
       for (const item of items || []) {
         if (item?.source !== source) continue;
-        const candidates = [item.courseCode, item.courseName]
+        const candidates = [item.courseCode, item.courseName, item.courseKey]
           .map((v) => normalizeLoose(String(v || "").replace(/^(?:prairielearn|prairietest|canvas|gradescope|courseweb):/, "")))
           .filter(Boolean);
         if (candidates.some(sameFamily)) {
@@ -188,6 +229,9 @@
           if (href) return href;
         }
       }
+    }
+    if (source === "prairielearn" && (String(key).startsWith("prairielearn:") || familyCode)) {
+      return "https://us.prairielearn.com/pl";
     }
     return null;
   }
@@ -230,32 +274,32 @@
 
   // Render a green checkmark + "Link" anchor for an enrolled course column.
   function appendPresenceLink(cell, document, href, sourceLabel) {
+    if (!href) {
+      cell.textContent = "—";
+      return;
+    }
     const mark = document.createElement("span");
     mark.className = "prr-course-link__check";
     mark.setAttribute("aria-hidden", "true");
     mark.textContent = "✓";
 
-    if (href) {
-      const link = document.createElement("a");
-      link.className = "prr-course-link";
-      link.href = href;
-      link.target = "_blank";
-      link.rel = "noreferrer";
-      link.setAttribute("aria-label", `Open ${sourceLabel} course page`);
-      link.append(mark, document.createTextNode(" Link"));
-      cell.append(link);
-      return;
-    }
-    const span = document.createElement("span");
-    span.className = "prr-course-link prr-course-link--nolink";
-    span.title = `${sourceLabel} course found, but no course page URL is available`;
-    span.append(mark, document.createTextNode(" Link"));
-    cell.append(span);
+    const link = document.createElement("a");
+    link.className = "prr-course-link";
+    link.href = href;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    link.setAttribute("aria-label", `Open ${sourceLabel} course page`);
+    link.append(mark, document.createTextNode(" Link"));
+    cell.append(link);
   }
 
   function firstCourseHref(items, source, keys, urls, familyCode) {
     for (const key of keys) {
       const href = resolveCourseHref(items, source, key, urls, familyCode);
+      if (href) return href;
+    }
+    if (familyCode) {
+      const href = resolveCourseHref(items, source, familyCode, urls, familyCode);
       if (href) return href;
     }
     return null;

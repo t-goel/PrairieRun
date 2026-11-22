@@ -425,3 +425,38 @@ test("a course with only PrairieTest still gets paired PrairieLearn link", () =>
   assert.ok(ptAnchor);
   assert.equal(ptAnchor.getAttribute("href"), "https://us.prairietest.com/pt");
 });
+
+test("PrairieLearn resolves exact course instance URL and never emits nolink span", () => {
+  const { document } = require("linkedom").parseHTML("<!doctype html><html><body></body></html>");
+  const items = [
+    {
+      source: "prairielearn",
+      courseKey: "prairielearn:223990",
+      courseCode: "CS498",
+      courseName: "CS 498: Cloud Computing",
+      url: "https://us.prairielearn.com/pl/course_instance/223990/assessments",
+    },
+    {
+      source: "canvas",
+      courseKey: "canvas:999",
+      courseCode: "CS498",
+      courseName: "CS 498",
+      url: "https://canvas.illinois.edu/courses/999/assignments/1",
+    },
+  ];
+  const suggested = store.suggestCourseLinks(items);
+  const { table, codes } = courses.buildTable(document, items, {}, suggested);
+  assert.deepEqual(codes, ["CS498"]);
+
+  const row = table.querySelector("tr:nth-child(2)");
+  const cells = [...row.querySelectorAll("td")];
+  // PrairieLearn cell links directly to the course instance assessments URL
+  const plAnchor = cells[1].querySelector("a.prr-course-link");
+  assert.ok(plAnchor);
+  assert.equal(plAnchor.getAttribute("href"), "https://us.prairielearn.com/pl/course_instance/223990/assessments");
+
+  // No nolink spans exist in the entire table
+  assert.equal(table.querySelectorAll(".prr-course-link--nolink").length, 0);
+  // Empty source column (e.g. Gradescope) is "—"
+  assert.equal(cells[2].textContent.trim(), "—");
+});

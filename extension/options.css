@@ -208,14 +208,17 @@ button.secondary {
 .auth-buttons [hidden] {
   display: none !important;
 }
+.card .auth-buttons button,
+.calendar-google-head .auth-buttons button,
 .auth-buttons button {
   width: auto;
-  height: 30px;
+  height: 32px;
+  min-height: 32px;
   box-sizing: border-box;
   font-size: 11px;
   line-height: 1;
-  padding: 0 10px;
-  margin: 0;
+  padding: 0 12px;
+  margin: 0 !important;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -246,10 +249,14 @@ button.secondary {
   transform: translate(2px, 2px);
   box-shadow: 0 0 0 var(--ink);
 }
+.card .auth-buttons button.icon-button,
+.calendar-google-head .auth-buttons button.icon-button,
 .auth-buttons button.icon-button {
-  width: 30px;
-  height: 30px;
-  padding: 0;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0 !important;
+  margin: 0 !important;
   flex-shrink: 0;
 }
 .auth-buttons button.icon-button svg {
@@ -259,12 +266,15 @@ button.secondary {
   margin: auto;
 }
 .calendar-sync-info {
-  margin-top: 0;
-  padding: 6px 10px;
+  margin: 0 !important;
+  padding: 0 10px;
+  min-height: 32px;
+  box-sizing: border-box;
   background: var(--wash);
   border: 2px solid var(--ink);
-  display: grid;
-  gap: 2px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 .calendar-sync-details:empty {
   display: none;
@@ -278,21 +288,31 @@ button.secondary {
 .calendar-google-head .calendar-sync-info {
   flex: 1;
   min-width: 0;
-  margin-top: 0;
+  margin: 0 !important;
+  padding: 0 10px;
+  min-height: 32px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 .calendar-google-head .auth-buttons {
   flex-shrink: 0;
-  margin-left: 0;
+  margin: 0 !important;
+  display: inline-flex;
+  align-items: center;
 }
 .calendar-sync-status {
   font-size: 12px;
   font-weight: 800;
   color: var(--ink);
   margin: 0;
+  line-height: 1.2;
 }
 .calendar-sync-details {
   font-size: 11px;
-  margin: 0;
+  margin: 2px 0 0;
+  line-height: 1.2;
 }
 .auth-details { margin-top: 10px; font-size: 12px; }
 .auth-details summary { cursor: pointer; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
@@ -347,11 +367,18 @@ button.secondary {
   white-space: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   font-size: 11px;
   padding: 6px 8px;
   border: 2px solid var(--ink);
   background: var(--wash);
   box-sizing: border-box;
+}
+.auth-redirect-row code::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 .auth-redirect-row button.icon-button {
   width: 32px;
@@ -817,8 +844,6 @@ button.source-action { width: 100%; padding: 6px 10px; font-size: 11px; margin-t
 }
 .prr-course-link:hover { text-decoration: underline; }
 .prr-course-link__check { color: var(--ok); font-weight: 900; }
-.prr-course-link--nolink { color: #666; cursor: default; }
-.prr-course-link--nolink .prr-course-link__check { color: #666; }
 
 /* Course links table */
 #course-links {
