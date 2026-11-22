@@ -633,7 +633,7 @@ button.source-action { width: 100%; padding: 6px 10px; font-size: 11px; margin-t
 .prr-digest-list[data-prr-digest] { min-width: 0; }
 .prr-digest-row {
   display: grid;
-  grid-template-columns: 116px 74px minmax(0, 1fr) auto;
+  grid-template-columns: 116px 74px minmax(0, 1fr) auto auto;
   gap: 12px;
   align-items: center;
   padding: 10px 0;
@@ -681,18 +681,75 @@ span.prr-digest-title { text-decoration: none; }
   white-space: nowrap;
   justify-self: end;
 }
+.prr-digest-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: end;
+  flex-shrink: 0;
+}
+.prr-digest-action-btn {
+  width: 26px;
+  height: 26px;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  background: var(--paper);
+  color: var(--ink);
+  border: 2px solid var(--ink);
+  box-shadow: 2px 2px 0 var(--ink);
+  cursor: pointer;
+  transition: transform .05s ease, box-shadow .05s ease, background-color .1s ease, color .1s ease;
+  flex-shrink: 0;
+}
+.prr-digest-action-btn:hover {
+  background: var(--wash);
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--ink);
+}
+.prr-digest-action-btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: 0 0 0 var(--ink);
+}
+.prr-digest-action-btn--active {
+  background: var(--ink);
+  color: var(--paper);
+}
+.prr-digest-action-btn--active:hover {
+  background: #333;
+  color: #fff;
+}
+.prr-digest-action-remove:hover {
+  background: #fee;
+  color: var(--err);
+  border-color: var(--err);
+}
+.prr-digest-action-btn svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+.prr-digest-row--calendar-hidden .prr-digest-due {
+  text-decoration: line-through;
+  opacity: 0.65;
+}
 @media (max-width: 760px) {
   .prr-digest-row {
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
     grid-template-areas:
-      "badge due"
-      "course title";
+      "badge due actions"
+      "course title actions";
     gap: 6px 10px;
-    align-items: baseline;
+    align-items: center;
   }
   .prr-digest-badge { grid-area: badge; width: auto; }
   .prr-digest-course { grid-area: course; }
   .prr-digest-title { grid-area: title; }
   .prr-digest-due { grid-area: due; justify-self: end; white-space: nowrap; }
+  .prr-digest-actions { grid-area: actions; align-self: center; }
 }
 

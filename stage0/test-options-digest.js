@@ -160,3 +160,57 @@ test("selectDigestItems deduplicates across title whitespace variations (HW4 vs 
   assert.equal(selected.length, 1);
   assert.equal(selected[0].source, "gradescope");
 });
+
+test("selectDigestItems filters out removedDeadlines", () => {
+  const now = new Date("2026-11-10T18:00:00Z");
+  const keep = item({ id: "keep-1", title: "Keep", dueAt: "2026-11-12T06:00:00Z" });
+  const drop = item({ id: "office-hours", title: "Office Hours", dueAt: "2026-11-12T06:00:00Z" });
+  const selected = digest.selectDigestItems([keep, drop], { now, removedDeadlines: ["office-hours"] });
+  assert.equal(selected.length, 1);
+  assert.equal(selected[0].id, "keep-1");
+});
+
+test("renderRow builds action buttons with hide-from-calendar and remove controls", () => {
+  const { document } = require("linkedom").parseHTML("<!doctype html><html><body></body></html>");
+  globalThis.document = document;
+  const rowItem = item({
+    id: "item-1",
+    source: "canvas",
+    courseCode: "CS 425",
+    title: "Office Hours",
+    dueAt: "2026-11-12T06:00:00Z",
+  });
+  let toggled = false;
+  let removed = false;
+  const row = digest.renderRow(rowItem, null, {
+    isCalendarHidden: false,
+    onToggleHide: () => { toggled = true; },
+    onRemove: () => { removed = true; },
+  });
+  const hideBtn = row.querySelector(".prr-digest-action-hide");
+  const removeBtn = row.querySelector(".prr-digest-action-remove");
+  assert.ok(hideBtn);
+  assert.ok(removeBtn);
+  assert.equal(hideBtn.getAttribute("aria-label"), "Hide from calendar");
+  assert.equal(removeBtn.getAttribute("aria-label"), "Remove");
+  hideBtn.click();
+  removeBtn.click();
+  assert.equal(toggled, true);
+  assert.equal(removed, true);
+});
+
+test("renderRow reflects isCalendarHidden with active button and row class", () => {
+  const { document } = require("linkedom").parseHTML("<!doctype html><html><body></body></html>");
+  globalThis.document = document;
+  const rowItem = item({
+    id: "item-2",
+    source: "canvas",
+    title: "Discussion",
+    dueAt: "2026-11-12T06:00:00Z",
+  });
+  const row = digest.renderRow(rowItem, null, { isCalendarHidden: true });
+  assert.ok(row.classList.contains("prr-digest-row--calendar-hidden"));
+  const hideBtn = row.querySelector(".prr-digest-action-hide");
+  assert.ok(hideBtn.classList.contains("prr-digest-action-btn--active"));
+  assert.equal(hideBtn.getAttribute("aria-label"), "Unhide from calendar");
+});

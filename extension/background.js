@@ -197,9 +197,21 @@ function authRequiredStatus() {
 }
 
 async function loadGoogleCalendarExportItems() {
-  const stored = await PrairieRunExt.storageLocalGet([ASSIGNMENTS_KEY, "prairierunDeadlines"]);
-  const deadlines = Array.isArray(stored.prairierunDeadlines) ? stored.prairierunDeadlines : [];
-  const legacyAssignments = Array.isArray(stored[ASSIGNMENTS_KEY]) ? stored[ASSIGNMENTS_KEY] : [];
+  const stored = await PrairieRunExt.storageLocalGet([
+    ASSIGNMENTS_KEY,
+    "prairierunDeadlines",
+    "prairierunHiddenFromCalendar",
+    "prairierunRemovedDeadlines",
+  ]);
+  const hiddenCalendar = new Set(Array.isArray(stored.prairierunHiddenFromCalendar) ? stored.prairierunHiddenFromCalendar : []);
+  const removedDeadlines = new Set(Array.isArray(stored.prairierunRemovedDeadlines) ? stored.prairierunRemovedDeadlines : []);
+  const isExcluded = (item) => {
+    if (!item?.id) return false;
+    if (hiddenCalendar.has(item.id) || removedDeadlines.has(item.id)) return true;
+    return (item.aliases || []).some((a) => hiddenCalendar.has(a) || removedDeadlines.has(a));
+  };
+  const deadlines = (Array.isArray(stored.prairierunDeadlines) ? stored.prairierunDeadlines : []).filter((item) => !isExcluded(item));
+  const legacyAssignments = (Array.isArray(stored[ASSIGNMENTS_KEY]) ? stored[ASSIGNMENTS_KEY] : []).filter((item) => !isExcluded(item));
   const legacyById = new Map(legacyAssignments.map((item) => [item?.id, item]));
 
   const datedDeadlines = deadlines.filter((item) => item && (item.dueAt || item.dueAtLocal) && item.syncState !== "stale");
@@ -606,6 +618,61 @@ PrairieRunExt.addRuntimeMessageListener((message, sender, sendResponse) => {
   if (message?.type === "PRAIRIERUN_AUTH_DISCONNECT") {
     debugLog("Google Calendar disconnect requested");
     PrairieRunCalendar.disconnectGoogleCalendar().then((status) => sendResponse({ ok: true, status })).catch((error) => sendResponse({ ok: false, error: error?.message || "Could not sign out." }));
+    return true;
+  }
+  if (message?.type === "PRAIRIERUN_REMOVE_ASSIGNMENT") {
+    const item = message.item;
+    (async () => {
+      if (item) {
+        try {
+          if (globalThis.PrairieRunCalendar?.removeAssignmentEvent) {
+            await PrairieRunCalendar.removeAssignmentEvent(item);
+          }
+        } catch (err) {
+          debugLog("Could not remove Calendar event for removed assignment", { id: item.id, error: err.message });
+        }
+        try {
+          const stored = await PrairieRunExt.storageLocalGet(["prairierunDeadlines", SETTINGS_KEY]);
+          const deadlines = Array.isArray(stored.prairierunDeadlines) ? stored.prairierunDeadlines : [];
+          const currentSettings = stored[SETTINGS_KEY] || {};
+          if (globalThis.PrairieRunOutputs?.run) {
+            await PrairieRunOutputs.run(deadlines, { added: [], changed: [], removed: [item.id] }, currentSettings);
+          }
+        } catch (err) {
+          debugLog("Could not update ICS feed for removed assignment", { error: err.message });
+        }
+      }
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+  if (message?.type === "PRAIRIERUN_TOGGLE_CALENDAR_HIDE") {
+    const item = message.item;
+    const isHidden = Boolean(message.hidden);
+    (async () => {
+      if (item) {
+        try {
+          if (isHidden && globalThis.PrairieRunCalendar?.removeAssignmentEvent) {
+            await PrairieRunCalendar.removeAssignmentEvent(item);
+          } else if (!isHidden) {
+            await syncGoogleCalendarFromStore("unhide");
+          }
+        } catch (err) {
+          debugLog("Calendar toggle sync error", { id: item.id, error: err.message });
+        }
+        try {
+          const stored = await PrairieRunExt.storageLocalGet(["prairierunDeadlines", SETTINGS_KEY]);
+          const deadlines = Array.isArray(stored.prairierunDeadlines) ? stored.prairierunDeadlines : [];
+          const currentSettings = stored[SETTINGS_KEY] || {};
+          if (globalThis.PrairieRunOutputs?.run) {
+            await PrairieRunOutputs.run(deadlines, { added: [], changed: [], removed: [] }, currentSettings);
+          }
+        } catch (err) {
+          debugLog("Could not update ICS feed for calendar hide toggle", { error: err.message });
+        }
+      }
+      sendResponse({ ok: true });
+    })();
     return true;
   }
   if (message?.type === "PRAIRIERUN_ASSIGNMENT_UPDATED" && sender.tab?.id) {

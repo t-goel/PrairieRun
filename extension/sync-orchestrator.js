@@ -255,6 +255,15 @@
         results,
         courseLinks
       );
+      let activeItems = items;
+      try {
+        const storedRemoved = (await globalThis.PrairieRunExt?.storageLocalGet?.("prairierunRemovedDeadlines"))?.prairierunRemovedDeadlines;
+        if (Array.isArray(storedRemoved) && storedRemoved.length) {
+          const removedSet = new Set(storedRemoved);
+          activeItems = items.filter((item) => !removedSet.has(item?.id) && !(item?.aliases || []).some((a) => removedSet.has(a)));
+        }
+      } catch { /* best effort */ }
+
       const status = {};
       for (const [sourceId, result] of Object.entries(results)) {
         const adapter = adapters.find((entry) => entry.id === sourceId);
@@ -273,7 +282,7 @@
           if (Array.isArray(res?.courses)) allCourses.push(...res.courses);
         }
         const payload = {
-          prairierunDeadlines: items,
+          prairierunDeadlines: activeItems,
           prairierunSourceStatus: status,
         };
         if (resolvedLinks && typeof resolvedLinks === "object") {
@@ -285,7 +294,7 @@
         await globalThis.PrairieRunExt?.storageLocalSet?.(payload);
       } catch { /* storage failures must not break the contract in tests */ }
 
-      await globalThis.PrairieRunOutputs.run(items, changes, settings);
+      await globalThis.PrairieRunOutputs.run(activeItems, changes, settings);
       return { results, items, changes };
     } finally {
       activeSync = null;

@@ -75,6 +75,22 @@
     await ext()?.storageLocalSet?.({ [STATUS_KEY]: { ...(await readState()), ...patch } });
   }
 
+  async function filterActiveCalendarItems(items) {
+    try {
+      const stored = (await ext()?.storageLocalGet?.(["prairierunHiddenFromCalendar", "prairierunRemovedDeadlines"])) || {};
+      const hidden = new Set(Array.isArray(stored.prairierunHiddenFromCalendar) ? stored.prairierunHiddenFromCalendar : []);
+      const removed = new Set(Array.isArray(stored.prairierunRemovedDeadlines) ? stored.prairierunRemovedDeadlines : []);
+      if (!hidden.size && !removed.size) return items || [];
+      return (items || []).filter((item) => {
+        if (!item?.id) return true;
+        if (hidden.has(item.id) || removed.has(item.id)) return false;
+        return !(item.aliases || []).some((a) => hidden.has(a) || removed.has(a));
+      });
+    } catch {
+      return items || [];
+    }
+  }
+
   // Publish one ICS body. Never throws; resolves a result object so both the
   // background auto-publish and the options page can render it.
   async function publish(items, { settings, secrets } = {}) {
@@ -87,7 +103,8 @@
     // UID sequences are shared with the manual export path so calendar apps
     // do not observe a shuffled identifier on the same assignment.
     const stored = (await ext()?.storageLocalGet?.([SEQUENCES_KEY])) || {};
-    const { text, sequences } = buildIcs(items, settings, stored[SEQUENCES_KEY]);
+    const activeItems = await filterActiveCalendarItems(items);
+    const { text, sequences } = buildIcs(activeItems, settings, stored[SEQUENCES_KEY]);
     if (ext()?.storageLocalSet && sequences) {
       try {
         await ext().storageLocalSet({ [SEQUENCES_KEY]: sequences });
@@ -203,7 +220,8 @@
     if (!key) return { ok: false, courseFeeds: {}, error: "Publish key missing." };
 
     const groups = new Map();
-    for (const item of items || []) {
+    const activeItems = await filterActiveCalendarItems(items);
+    for (const item of activeItems || []) {
       const code = String(item?.courseCode || item?.courseName || "uncategorized").trim() || "uncategorized";
       if (!groups.has(code)) groups.set(code, []);
       groups.get(code).push(item);

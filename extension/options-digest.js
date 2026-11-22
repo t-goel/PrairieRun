@@ -3,8 +3,10 @@
   const DEADLINES_KEY = "prairierunDeadlines";
   const ASSIGNMENTS_KEY = "prairierunAssignments";
   const LINKS_KEY = "prairierunCourseLinks";
-  const DEFAULT_LIMIT = 12;
-  const DEFAULT_WINDOW_DAYS = 14;
+  const HIDDEN_CALENDAR_KEY = "prairierunHiddenFromCalendar";
+  const REMOVED_DEADLINES_KEY = "prairierunRemovedDeadlines";
+  const DEFAULT_LIMIT = 100;
+  const DEFAULT_WINDOW_DAYS = 365;
 
   const SOURCE_BADGE = {
     prairielearn: "PrairieLearn",
@@ -162,12 +164,14 @@
   }
 
   // Pure helper: next dated, incomplete items within the window, capped.
-  function selectDigestItems(items, { now = new Date(), limit = DEFAULT_LIMIT, windowDays = DEFAULT_WINDOW_DAYS, links = null } = {}) {
+  function selectDigestItems(items, { now = new Date(), limit = DEFAULT_LIMIT, windowDays = DEFAULT_WINDOW_DAYS, links = null, removedDeadlines = [] } = {}) {
     const start = now instanceof Date ? now.getTime() : Date.parse(now);
-    const end = start + Math.max(0, Number(windowDays) || 0) * 24 * 60 * 60 * 1000;
+    const end = windowDays != null ? start + Math.max(0, Number(windowDays) || 0) * 24 * 60 * 60 * 1000 : Infinity;
+    const removedSet = new Set(removedDeadlines || []);
     const rows = [];
     for (const item of items || []) {
       if (!item || isCompleted(item)) continue;
+      if (item.id && (removedSet.has(item.id) || (item.aliases || []).some((a) => removedSet.has(a)))) continue;
       const t = dueMs(item);
       if (t === null) continue;
       // Include anything due later today through the window; drop fully past.
@@ -195,8 +199,11 @@
     return node;
   }
 
-  function renderRow(item, links = null) {
-    const row = make("li", { className: "prr-digest-row" });
+  function renderRow(item, links = null, options = {}) {
+    const { isCalendarHidden = false, onToggleHide = null, onRemove = null } = options;
+    const row = make("li", {
+      className: `prr-digest-row${isCalendarHidden ? " prr-digest-row--calendar-hidden" : ""}`,
+    });
     row.append(make("span", { className: "prr-digest-badge" }, sourceBadge(item)));
     const course = courseLabel(item, links);
     if (course) row.append(make("span", { className: "prr-digest-course" }, course));
@@ -214,16 +221,61 @@
       row.append(make("span", { className: "prr-digest-title" }, title));
     }
     row.append(make("span", { className: "prr-digest-due" }, formatDue(item)));
+
+    const actions = make("div", { className: "prr-digest-actions" });
+
+    // Hide from calendar button (calendar icon with diagonal slash)
+    const hideBtn = make("button", {
+      type: "button",
+      className: `prr-digest-action-btn prr-digest-action-hide${isCalendarHidden ? " prr-digest-action-btn--active" : ""}`,
+      title: isCalendarHidden ? "Unhide from calendar" : "Hide from calendar",
+      "aria-label": isCalendarHidden ? "Unhide from calendar" : "Hide from calendar",
+      "aria-pressed": isCalendarHidden ? "true" : "false",
+    });
+    hideBtn.innerHTML = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="1.5"></rect><line x1="2" y1="7" x2="14" y2="7"></line><line x1="5" y1="1.5" x2="5" y2="3.5"></line><line x1="11" y1="1.5" x2="11" y2="3.5"></line><line x1="2" y1="14" x2="14" y2="2"></line></svg>`;
+    if (typeof onToggleHide === "function") {
+      hideBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onToggleHide(item);
+      });
+    }
+    actions.append(hideBtn);
+
+    // Remove button (trash icon)
+    const removeBtn = make("button", {
+      type: "button",
+      className: "prr-digest-action-btn prr-digest-action-remove",
+      title: "Remove",
+      "aria-label": "Remove",
+    });
+    removeBtn.innerHTML = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h10"></path><path d="M5 4V2.5A.5.5 0 0 1 5.5 2h5a.5.5 0 0 1 .5.5V4"></path><path d="M4 4l.8 9.2a1 1 0 0 0 1 .8h4.4a1 1 0 0 0 1-.8L12 4"></path><line x1="6.5" y1="7" x2="6.5" y2="11"></line><line x1="9.5" y1="7" x2="9.5" y2="11"></line></svg>`;
+    if (typeof onRemove === "function") {
+      removeBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onRemove(item);
+      });
+    }
+    actions.append(removeBtn);
+
+    row.append(actions);
     return row;
   }
 
   async function loadData() {
-    const stored = await globalThis.PrairieRunExt.storageLocalGet([DEADLINES_KEY, ASSIGNMENTS_KEY, LINKS_KEY]);
+    const stored = await globalThis.PrairieRunExt.storageLocalGet([
+      DEADLINES_KEY,
+      ASSIGNMENTS_KEY,
+      LINKS_KEY,
+      HIDDEN_CALENDAR_KEY,
+      REMOVED_DEADLINES_KEY,
+    ]);
     let items = [];
     if (Array.isArray(stored[DEADLINES_KEY])) items = stored[DEADLINES_KEY];
     else if (Array.isArray(stored[ASSIGNMENTS_KEY])) items = stored[ASSIGNMENTS_KEY];
     const links = stored[LINKS_KEY] && typeof stored[LINKS_KEY] === "object" ? stored[LINKS_KEY] : {};
-    return { items, links };
+    const hiddenCalendar = Array.isArray(stored[HIDDEN_CALENDAR_KEY]) ? stored[HIDDEN_CALENDAR_KEY] : [];
+    const removedDeadlines = Array.isArray(stored[REMOVED_DEADLINES_KEY]) ? stored[REMOVED_DEADLINES_KEY] : [];
+    return { items, links, hiddenCalendar, removedDeadlines };
   }
 
   async function render(section) {
@@ -234,25 +286,103 @@
       section.append(root);
     }
 
+    async function handleToggleHide(item) {
+      if (!item?.id) return;
+      const stored = await globalThis.PrairieRunExt.storageLocalGet(HIDDEN_CALENDAR_KEY);
+      const current = Array.isArray(stored[HIDDEN_CALENDAR_KEY]) ? [...stored[HIDDEN_CALENDAR_KEY]] : [];
+      const index = current.indexOf(item.id);
+      const isHiding = index === -1;
+      if (isHiding) {
+        current.push(item.id);
+        for (const alias of item.aliases || []) {
+          if (!current.includes(alias)) current.push(alias);
+        }
+      } else {
+        current.splice(index, 1);
+        for (const alias of item.aliases || []) {
+          const ai = current.indexOf(alias);
+          if (ai !== -1) current.splice(ai, 1);
+        }
+      }
+      await globalThis.PrairieRunExt.storageLocalSet({ [HIDDEN_CALENDAR_KEY]: current });
+
+      try {
+        await globalThis.PrairieRunExt.runtimeSendMessage?.({
+          type: "PRAIRIERUN_TOGGLE_CALENDAR_HIDE",
+          item,
+          hidden: isHiding,
+        });
+      } catch { /* best effort */ }
+
+      await refresh();
+    }
+
+    async function handleRemove(item) {
+      if (!item?.id) return;
+      const stored = await globalThis.PrairieRunExt.storageLocalGet([
+        REMOVED_DEADLINES_KEY,
+        DEADLINES_KEY,
+        ASSIGNMENTS_KEY,
+      ]);
+      const currentRemoved = Array.isArray(stored[REMOVED_DEADLINES_KEY]) ? [...stored[REMOVED_DEADLINES_KEY]] : [];
+      if (!currentRemoved.includes(item.id)) currentRemoved.push(item.id);
+      for (const alias of item.aliases || []) {
+        if (!currentRemoved.includes(alias)) currentRemoved.push(alias);
+      }
+
+      const currentDeadlines = Array.isArray(stored[DEADLINES_KEY])
+        ? stored[DEADLINES_KEY].filter((d) => d.id !== item.id && !(item.aliases || []).includes(d.id))
+        : [];
+      const currentAssignments = Array.isArray(stored[ASSIGNMENTS_KEY])
+        ? stored[ASSIGNMENTS_KEY].filter((a) => a.id !== item.id && !(item.aliases || []).includes(a.id))
+        : [];
+
+      await globalThis.PrairieRunExt.storageLocalSet({
+        [REMOVED_DEADLINES_KEY]: currentRemoved,
+        [DEADLINES_KEY]: currentDeadlines,
+        [ASSIGNMENTS_KEY]: currentAssignments,
+      });
+
+      try {
+        await globalThis.PrairieRunExt.runtimeSendMessage?.({
+          type: "PRAIRIERUN_REMOVE_ASSIGNMENT",
+          item,
+        });
+      } catch { /* best effort */ }
+
+      await refresh();
+    }
+
     async function refresh() {
       root.textContent = "";
       let items = [];
       let links = {};
+      let hiddenCalendarSet = new Set();
+      let removedDeadlines = [];
       try {
         const data = await loadData();
         items = data.items;
         links = data.links;
+        hiddenCalendarSet = new Set(data.hiddenCalendar || []);
+        removedDeadlines = data.removedDeadlines || [];
       } catch (error) {
         root.append(make("p", { className: "muted" }, error?.message || "Could not load digest."));
         return;
       }
-      const selected = selectDigestItems(items, { links });
+      const selected = selectDigestItems(items, { links, removedDeadlines });
       if (!selected.length) {
         root.append(make("p", { className: "muted" }, "Nothing upcoming."));
         return;
       }
       const list = make("ul", { className: "prr-digest-list" });
-      for (const item of selected) list.append(renderRow(item, links));
+      for (const item of selected) {
+        const isCalendarHidden = hiddenCalendarSet.has(item.id) || (item.aliases || []).some((a) => hiddenCalendarSet.has(a));
+        list.append(renderRow(item, links, {
+          isCalendarHidden,
+          onToggleHide: handleToggleHide,
+          onRemove: handleRemove,
+        }));
+      }
       root.append(list);
     }
 
@@ -260,7 +390,15 @@
     try {
       globalThis.PrairieRunExt?.storageOnChanged?.((changes, area) => {
         if (area && area !== "local") return;
-        if (changes[DEADLINES_KEY] || changes[ASSIGNMENTS_KEY] || changes[LINKS_KEY]) refresh();
+        if (
+          changes[DEADLINES_KEY] ||
+          changes[ASSIGNMENTS_KEY] ||
+          changes[LINKS_KEY] ||
+          changes[HIDDEN_CALENDAR_KEY] ||
+          changes[REMOVED_DEADLINES_KEY]
+        ) {
+          refresh();
+        }
       });
     } catch { /* ignore */ }
   }
@@ -272,7 +410,16 @@
     });
   }
 
-  const api = { selectDigestItems, dueMs, courseLabel, renderRow, render, deduplicateDigestItems };
+  const api = {
+    selectDigestItems,
+    dueMs,
+    courseLabel,
+    renderRow,
+    render,
+    deduplicateDigestItems,
+    HIDDEN_CALENDAR_KEY,
+    REMOVED_DEADLINES_KEY,
+  };
   globalThis.PrairieRunOptionsDigest = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })();
