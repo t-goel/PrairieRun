@@ -42,9 +42,10 @@
       row.appendChild(link);
       const remove = document.createElement("button");
       remove.type = "button";
-      remove.className = "secondary";
-      remove.textContent = "Remove";
+      remove.className = "secondary icon-button course-website-remove";
+      remove.innerHTML = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h10"></path><path d="M5 4V2.5A.5.5 0 0 1 5.5 2h5a.5.5 0 0 1 .5.5V4"></path><path d="M4 4l.8 9.2a1 1 0 0 0 1 .8h4.4a1 1 0 0 0 1-.8L12 4"></path><line x1="6.5" y1="7.5" x2="6.5" y2="11"></line><line x1="9.5" y1="7.5" x2="9.5" y2="11"></line></svg>';
       remove.setAttribute("aria-label", `Remove ${url}`);
+      remove.setAttribute("title", `Remove ${url}`);
       remove.addEventListener("click", async () => {
         const latest = await readSettings();
         latest.courseWebsites = (latest.courseWebsites || []).map(normalizeUrl).filter((value) => value && value !== url);

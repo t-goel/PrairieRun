@@ -37,6 +37,17 @@ function makeNode(tag) {
     get className() {
       return this.attributes.class || "";
     },
+    set innerHTML(html) {
+      this._html = String(html ?? "");
+      this.children = [];
+      const tagMatches = [...this._html.matchAll(/<([a-zA-Z][\w-]*)/g)];
+      for (const m of tagMatches) {
+        this.children.push(makeNode(m[1]));
+      }
+    },
+    get innerHTML() {
+      return this._html || "";
+    },
     set textContent(v) {
       this._text = String(v ?? "");
       this.children = [];
@@ -181,7 +192,7 @@ test("render builds controls and drops the coming-soon note", async () => {
   await renderFresh(section);
   assert.equal(section.querySelectorAll("p").filter((p) => p.textContent === "Coming soon").length, 0);
   find(section, '[data-pr-canvas-feed]');
-  find(section, '[data-pr-canvas-planner]');
+  assert.equal(section.querySelectorAll('[data-pr-canvas-planner]').length, 0, "planner checkbox is removed");
   assert.equal(find(section, '[data-pr-canvas-feed]').tag, "input");
   assert.equal(find(section, '[data-pr-canvas-feed]').attributes.type, "password");
 });
@@ -316,11 +327,15 @@ test("clearing the feed URL triggers a resync only while Canvas is enabled", asy
   assert.deepEqual(disabled.messengerCalls, []);
 });
 
-test("planner checkbox persists plannerApi", async () => {
+test("connected buttons use icon-button styling with SVG", async () => {
   const section = newSection();
-  const { store } = await renderFresh(section);
-  const box = find(section, '[data-pr-canvas-planner]');
-  box.checked = true;
-  await fire(box, "change");
-  assert.equal(store.prairierunSettings.sources.canvas.plannerApi, true);
+  await renderFresh(section, { seedSecrets: { canvasFeedUrl: GOOD_URL } });
+  const changeBtn = find(section, '[data-pr-canvas-change]');
+  const clearBtn = find(section, '[data-pr-canvas-clear]');
+  assert.ok(changeBtn.attributes.class.includes("icon-button"));
+  assert.ok(clearBtn.attributes.class.includes("icon-button"));
+  assert.ok(changeBtn.getAttribute("aria-label")?.includes("Change"));
+  assert.ok(clearBtn.getAttribute("aria-label")?.includes("Clear"));
+  assert.equal(changeBtn.children.filter((c) => c.tag === "svg").length, 1);
+  assert.equal(clearBtn.children.filter((c) => c.tag === "svg").length, 1);
 });

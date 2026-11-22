@@ -26,14 +26,14 @@
   }
 
   async function loadCanvasSettings() {
-    const fallback = { enabled: false, plannerApi: false };
+    const fallback = { enabled: false, plannerApi: true };
     try {
       const stored = await ext()?.storageLocalGet?.("prairierunSettings");
       const entry = stored?.prairierunSettings?.sources?.canvas;
       if (!entry || typeof entry !== "object") return { ...fallback };
       return {
         enabled: entry.enabled === true,
-        plannerApi: entry.plannerApi === true,
+        plannerApi: entry.plannerApi !== false,
       };
     } catch {
       return { ...fallback };
@@ -133,8 +133,23 @@
     const connected = make("div", { className: "auth-row pr-canvas-connected", "data-pr-canvas-connected": "1" });
     const savedLine = make("p", { className: "muted", "data-pr-canvas-saved": "1" });
     const connectedButtons = make("div", { className: "auth-buttons" });
-    const changeButton = make("button", { type: "button", className: "secondary", "data-pr-canvas-change": "1" }, "Change");
-    const clearButton = make("button", { type: "button", className: "secondary", "data-pr-canvas-clear": "1" }, "Clear");
+    const changeButton = make("button", {
+      type: "button",
+      className: "secondary icon-button",
+      "data-pr-canvas-change": "1",
+      title: "Change feed URL",
+      "aria-label": "Change feed URL",
+    });
+    changeButton.innerHTML = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 8a6.5 6.5 0 1 0 1.9-4.6L1.5 5.5"></path><path d="M1.5 2v3.5H5"></path></svg>`;
+
+    const clearButton = make("button", {
+      type: "button",
+      className: "secondary icon-button",
+      "data-pr-canvas-clear": "1",
+      title: "Clear feed URL",
+      "aria-label": "Clear feed URL",
+    });
+    clearButton.innerHTML = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h10"></path><path d="M5 4V2.5A.5.5 0 0 1 5.5 2h5a.5.5 0 0 1 .5.5V4"></path><path d="M4 4l.8 9.2a1 1 0 0 0 1 .8h4.4a1 1 0 0 0 1-.8L12 4"></path><line x1="6.5" y1="7.5" x2="6.5" y2="11"></line><line x1="9.5" y1="7.5" x2="9.5" y2="11"></line></svg>`;
     connectedButtons.append(changeButton, clearButton);
     connected.append(savedLine, connectedButtons);
 
@@ -158,11 +173,7 @@
     setupButtons.append(saveButton, cancelButton);
     setup.append(feedInput, setupButtons);
 
-    const plannerLabel = make("label", {});
-    const plannerBox = make("input", { type: "checkbox", "data-pr-canvas-planner": "1" });
-    plannerLabel.append(plannerBox, document.createTextNode(" Use Canvas session for submission status (planner API)"));
-
-    root.append(connected, setup, plannerLabel, message);
+    root.append(connected, setup, message);
     section.appendChild(root);
 
     let editing = false;
@@ -188,8 +199,6 @@
       }
     }
 
-    const canvas = await loadCanvasSettings();
-    plannerBox.checked = canvas.plannerApi;
     await applyView();
 
     changeButton.addEventListener("click", async () => {
@@ -243,17 +252,6 @@
         setMessage(message, "Feed URL cleared.", null);
       } catch {
         setMessage(message, "Could not clear the feed URL.", "error");
-      }
-    });
-
-    plannerBox.addEventListener("change", async () => {
-      const want = plannerBox.checked;
-      try {
-        await saveCanvasSettings({ plannerApi: want });
-        setMessage(message, want ? "Planner status on." : "Planner status off.", null);
-      } catch {
-        plannerBox.checked = !want;
-        setMessage(message, "Could not save the planner setting.", "error");
       }
     });
   }

@@ -54,8 +54,87 @@
       title = sectionMatch[1].trim();
       section = sectionMatch[2].trim();
     }
-    const display = codeRaw ? displayCourseCode(codeRaw) : "";
+    let display = codeRaw ? displayCourseCode(codeRaw) : "";
+    // Feeds sometimes omit the "[subj_nnn_…]" bracket and only leave the
+    // section suffix ("ECON 482 AL1 Fall 2026 CRN73117"). Pull the code from
+    // there so Course links still get a Canvas row.
+    if (!display && section) {
+      const fromSection = String(section).match(/\b([A-Za-z]{2,4})\s+(\d{3}[A-Za-z0-9]{0,3})\b/);
+      if (fromSection) display = `${fromSection[1].toUpperCase()} ${fromSection[2].toUpperCase()}`;
+    }
+    if (!display) {
+      const fromTitle = String(title || collapsed).match(/\b([A-Za-z]{2,4})\s+(\d{3}[A-Za-z0-9]{0,3})\b/);
+      if (fromTitle) display = `${fromTitle[1].toUpperCase()} ${fromTitle[2].toUpperCase()}`;
+    }
     return { title: title || collapsed, courseDisplay: display, section };
+  }
+
+  function coursesFromItems(items, feedOrigin) {
+    const byKey = new Map();
+    for (const item of items || []) {
+      const match = String(item?.courseKey || "").match(/^canvas:(\d+)$/);
+      if (!match) continue;
+      const id = match[1];
+      const key = `canvas:${id}`;
+      if (byKey.has(key)) continue;
+      byKey.set(key, {
+        id,
+        source: "canvas",
+        courseKey: key,
+        courseCode: item.courseCode || null,
+        courseName: item.courseName || item.courseCode || "",
+        url: `${feedOrigin}/courses/${id}`,
+      });
+    }
+    return [...byKey.values()];
+  }
+
+  async function fetchEnrolledCourses(ctx, feedUrl) {
+    let origin = CANVAS_ORIGIN;
+    try { origin = new URL(feedUrl).origin; } catch { /* keep default */ }
+    const url = `${origin}/api/v1/courses?enrollment_state=active&per_page=100`;
+    let result;
+    try {
+      result = await ctx.fetchPage(url, { accept: "application/json", credentials: "include" });
+    } catch (error) {
+      log(ctx, "Canvas courses fetch failed.", { error: safeMessage(error) });
+      return [];
+    }
+    if (!result || result.ok === false) {
+      log(ctx, "Canvas courses fetch failed.", { status: result?.status ?? null });
+      return [];
+    }
+    let payload;
+    try {
+      payload = JSON.parse(stripJsonPrefix(result.text));
+    } catch (error) {
+      log(ctx, "Canvas courses JSON unparseable.", { error: safeMessage(error) });
+      return [];
+    }
+    if (!Array.isArray(payload)) return [];
+    const courses = [];
+    for (const entry of payload) {
+      const id = entry?.id != null ? String(entry.id) : "";
+      if (!id) continue;
+      const codeRaw = String(entry.course_code || entry.name || "");
+      let courseCode = null;
+      const underscored = codeRaw.match(/^([a-z]+)_(\d{3}[a-z]?)(?:_\d+)?/i);
+      if (underscored) {
+        courseCode = `${underscored[1].toUpperCase()} ${underscored[2].toUpperCase()}`;
+      } else {
+        const spaced = codeRaw.match(/\b([A-Za-z]{2,4})\s*[_-]?(\d{3}[A-Za-z0-9]{0,3})\b/);
+        if (spaced) courseCode = `${spaced[1].toUpperCase()} ${spaced[2].toUpperCase()}`;
+      }
+      courses.push({
+        id,
+        source: "canvas",
+        courseKey: `canvas:${id}`,
+        courseCode,
+        courseName: String(entry.name || courseCode || id).trim(),
+        url: `${origin}/courses/${id}`,
+      });
+    }
+    return courses;
   }
 
   function originOf(urlValue, fallbackOrigin) {
@@ -293,8 +372,15 @@
       }
       log(ctx, "Parsed Canvas calendar feed.", { events: events.length, items: items.length, skipped });
 
-      const plannerOn = Boolean(ctx?.settings?.sources?.canvas?.plannerApi);
-      if (!plannerOn) return { status: "ok", items, checkedAt: checkedAt() };
+      const coursesByKey = new Map();
+      for (const course of coursesFromItems(items, feedOrigin)) {
+        coursesByKey.set(course.courseKey, course);
+      }
+
+      const plannerOn = ctx?.settings?.sources?.canvas?.plannerApi !== false;
+      if (!plannerOn) {
+        return { status: "ok", items, courses: [...coursesByKey.values()], checkedAt: checkedAt() };
+      }
 
       const { statuses, signedOut } = await fetchPlannerStatuses(ctx, feedUrl);
       let merged = 0;
@@ -306,10 +392,23 @@
         }
       }
       log(ctx, "Merged Canvas planner statuses.", { plannerEntries: statuses.size, merged });
-      if (signedOut) {
-        return { status: "ok", items, error: "Canvas session expired; status unavailable", checkedAt: checkedAt() };
+
+      // Enrolled course list fills Course Links for classes with no feed events
+      // (e.g. Econ 482 with nothing due in the ICS window).
+      for (const course of await fetchEnrolledCourses(ctx, feedUrl)) {
+        if (!coursesByKey.has(course.courseKey)) coursesByKey.set(course.courseKey, course);
+        else {
+          const existing = coursesByKey.get(course.courseKey);
+          if (!existing.courseCode && course.courseCode) existing.courseCode = course.courseCode;
+          if (!existing.courseName && course.courseName) existing.courseName = course.courseName;
+        }
       }
-      return { status: "ok", items, checkedAt: checkedAt() };
+
+      const courses = [...coursesByKey.values()];
+      if (signedOut) {
+        return { status: "ok", items, courses, error: "Canvas session expired; status unavailable", checkedAt: checkedAt() };
+      }
+      return { status: "ok", items, courses, checkedAt: checkedAt() };
     },
   };
 

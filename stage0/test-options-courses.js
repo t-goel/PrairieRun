@@ -74,6 +74,10 @@ test("courseHomeUrl maps assignment URLs to course homes", () => {
     courses.courseHomeUrl("https://prairietest.example.com/pt/reservations/1"),
     "https://prairietest.example.com/pt"
   );
+  assert.equal(
+    courses.courseHomeUrl("https://courses.grainger.illinois.edu/cs425/fa2026/assignments.html"),
+    "https://courses.grainger.illinois.edu/cs425/fa2026/assignments.html"
+  );
   assert.equal(courses.courseHomeUrl("not a url"), null);
   assert.equal(courses.courseHomeUrl(""), null);
 });
@@ -215,4 +219,209 @@ test("buildTable renders check Link for enrolled Gradescope course with zero ass
   assert.equal(gsAnchor.getAttribute("href"), "https://www.gradescope.com/courses/101");
   assert.match(cells[3].textContent, /✓\s*Link/); // Canvas
   assert.equal(cells[4].textContent, "—"); // PrairieTest
+});
+
+test("ECON482 Canvas-only course still gets a table row with a Canvas link", () => {
+  const { document } = require("linkedom").parseHTML("<!doctype html><html><body></body></html>");
+  // Canvas feed event without the "[econ_482_...]" code bracket: courseName is
+  // empty and the code only appears in the title.
+  const items = [
+    {
+      source: "canvas",
+      courseKey: "canvas:777",
+      courseName: "",
+      courseCode: null,
+      title: "ECON 482 (ECON 482 AL1 Fall 2026 CRN73117)",
+      url: "https://canvas.illinois.edu/courses/777/assignments/1",
+    },
+  ];
+  const suggested = store.suggestCourseLinks(items);
+  const { table, codes } = courses.buildTable(document, items, {}, suggested);
+  assert.deepEqual(codes, ["ECON482"], "ECON482 row must be suggested from the title");
+
+  const row = table.querySelector("tr:nth-child(2)");
+  assert.ok(row, "expected an ECON482 data row");
+  const cells = [...row.querySelectorAll("td")];
+  assert.equal(cells[0].textContent, "ECON482");
+  assert.equal(cells[1].textContent, "—"); // PrairieLearn
+  assert.equal(cells[2].textContent, "—"); // Gradescope
+  const canvasAnchor = cells[3].querySelector("a.prr-course-link");
+  assert.ok(canvasAnchor, "Canvas cell must link to the course home");
+  assert.equal(canvasAnchor.getAttribute("href"), "https://canvas.illinois.edu/courses/777");
+});
+
+test("CS498 family keeps the PrairieLearn link after folding CS498DK into CS498", () => {
+  const { document } = require("linkedom").parseHTML("<!doctype html><html><body></body></html>");
+  const items = [
+    {
+      source: "prairielearn",
+      courseKey: "prairielearn:101",
+      courseName: "CS 498DK2",
+      courseCode: "CS 498DK2",
+      title: "HW 1",
+      url: "https://us.prairielearn.com/pl/course_instance/101/assessment/1/",
+    },
+    {
+      source: "canvas",
+      courseKey: "canvas:55",
+      courseName: "CS 498",
+      courseCode: "CS 498",
+      title: "HW 1",
+      url: "https://canvas.illinois.edu/courses/55/assignments/9",
+    },
+  ];
+  const suggested = store.suggestCourseLinks(items);
+  // Stored links use the spaced family member; both fold into the CS498 row.
+  const links = courses.migrateStoredLinks({ "CS 498": { canvas: ["canvas:55"], confirmed: true } });
+  const { table, codes } = courses.buildTable(document, items, links, suggested);
+  assert.deepEqual(codes, ["CS498"]);
+
+  const row = table.querySelector("tr:nth-child(2)");
+  assert.ok(row, "expected a CS498 data row");
+  const cells = [...row.querySelectorAll("td")];
+  const plAnchor = cells[1].querySelector("a.prr-course-link");
+  assert.ok(plAnchor, "PrairieLearn cell must keep a link after the fold");
+  assert.equal(
+    plAnchor.getAttribute("href"),
+    "https://us.prairielearn.com/pl/course_instance/101/assessments"
+  );
+  const canvasAnchor = cells[3].querySelector("a.prr-course-link");
+  assert.ok(canvasAnchor);
+  assert.equal(canvasAnchor.getAttribute("href"), "https://canvas.illinois.edu/courses/55");
+});
+
+test("stored PrairieLearn key inherits the family href even without live CS498DK2 items", () => {
+  const { document } = require("linkedom").parseHTML("<!doctype html><html><body></body></html>");
+  // The PL items were dropped (source disabled/failed); the stored link still
+  // lists prairielearn:101. The cell must inherit the family course home from
+  // the CS498DK2 items rather than rendering a dead no-URL span.
+  const items = [
+    {
+      source: "prairielearn",
+      courseKey: "prairielearn:202",
+      courseName: "CS 498DK2",
+      courseCode: "CS 498DK2",
+      title: "HW 2",
+      url: "https://us.prairielearn.com/pl/course_instance/202/assessment/2/",
+    },
+  ];
+  const links = {
+    CS498: { prairielearn: ["prairielearn:101"], canvas: ["canvas:55"], confirmed: true },
+  };
+  const { table } = courses.buildTable(document, items, links, {});
+  const row = table.querySelector("tr:nth-child(2)");
+  assert.ok(row, "expected a CS498 data row");
+  const plAnchor = [...row.querySelectorAll("td")][1].querySelector("a.prr-course-link");
+  assert.ok(plAnchor, "PrairieLearn cell must resolve via the family sibling");
+  assert.equal(
+    plAnchor.getAttribute("href"),
+    "https://us.prairielearn.com/pl/course_instance/202/assessments"
+  );
+});
+
+test("CS425 Gradescope enrolled course shows even when the GS courseKey differs slightly", () => {
+  const { document } = require("linkedom").parseHTML("<!doctype html><html><body></body></html>");
+  // GS assignment items with a title-only short name (no code anywhere in the
+  // name), joined to Canvas via the enrolled-course sibling carrying the code.
+  const items = [
+    {
+      source: "canvas",
+      courseKey: "canvas:33",
+      courseName: "CS 425",
+      courseCode: "CS 425",
+      title: "HW 3",
+      url: "https://canvas.illinois.edu/courses/33/assignments/3",
+    },
+    {
+      source: "gradescope",
+      courseKey: "gradescope:888",
+      courseName: "Distributed Systems",
+      courseCode: null,
+      title: "HW 3",
+      url: "https://www.gradescope.com/courses/888/assignments/555",
+    },
+  ];
+  const enrolledCourses = [
+    {
+      source: "gradescope",
+      courseKey: "gradescope:888",
+      courseCode: "CS 425",
+      courseName: "Distributed Systems",
+      url: "https://www.gradescope.com/courses/888",
+    },
+  ];
+  const allEntities = [...items, ...enrolledCourses];
+  const suggested = store.suggestCourseLinks(allEntities);
+  const { table, codes } = courses.buildTable(document, allEntities, {}, suggested);
+  assert.deepEqual(codes, ["CS425"]);
+
+  const row = table.querySelector("tr:nth-child(2)");
+  assert.ok(row, "expected a CS425 data row");
+  const cells = [...row.querySelectorAll("td")];
+  const gsAnchor = cells[2].querySelector("a.prr-course-link");
+  assert.ok(gsAnchor, "Gradescope cell must show for a codeless-named GS course");
+  assert.equal(gsAnchor.getAttribute("href"), "https://www.gradescope.com/courses/888");
+  assert.ok(cells[3].querySelector("a.prr-course-link"), "Canvas cell stays linked");
+});
+
+test("PrairieLearn and PrairieTest links always exist together", () => {
+  const { document } = require("linkedom").parseHTML("<!doctype html><html><body></body></html>");
+  const items = [
+    {
+      source: "prairietest",
+      courseKey: "prairietest:CS 498",
+      courseCode: "CS 498",
+      courseName: "CS 498",
+      title: "Midterm Exam",
+      url: "https://us.prairietest.com/pt/reservations/99",
+    },
+    {
+      source: "prairielearn",
+      courseKey: "prairielearn:101",
+      courseCode: "CS 498",
+      courseName: "CS 498",
+      url: "https://us.prairielearn.com/pl/course_instance/101/assessment/1/",
+    },
+  ];
+  const suggested = store.suggestCourseLinks(items);
+  const { table, codes } = courses.buildTable(document, items, {}, suggested);
+  assert.deepEqual(codes, ["CS498"]);
+
+  const row = table.querySelector("tr:nth-child(2)");
+  const cells = [...row.querySelectorAll("td")];
+  // Cells: Course, PrairieLearn, Gradescope, Canvas, PrairieTest, Website
+  const plAnchor = cells[1].querySelector("a.prr-course-link");
+  assert.ok(plAnchor, "PrairieLearn link exists");
+  assert.equal(plAnchor.getAttribute("href"), "https://us.prairielearn.com/pl/course_instance/101/assessments");
+
+  const ptAnchor = cells[4].querySelector("a.prr-course-link");
+  assert.ok(ptAnchor, "PrairieTest link exists");
+  assert.equal(ptAnchor.getAttribute("href"), "https://us.prairietest.com/pt");
+});
+
+test("a course with only PrairieTest still gets paired PrairieLearn link", () => {
+  const { document } = require("linkedom").parseHTML("<!doctype html><html><body></body></html>");
+  const items = [
+    {
+      source: "prairietest",
+      courseKey: "prairietest:CS 498",
+      courseCode: "CS 498",
+      courseName: "CS 498",
+      title: "Midterm Exam",
+      url: "https://us.prairietest.com/pt/reservations/99",
+    },
+  ];
+  const suggested = store.suggestCourseLinks(items);
+  const { table, codes } = courses.buildTable(document, items, {}, suggested);
+  assert.deepEqual(codes, ["CS498"]);
+
+  const row = table.querySelector("tr:nth-child(2)");
+  const cells = [...row.querySelectorAll("td")];
+  // PrairieLearn cell must not be "—"
+  assert.notEqual(cells[1].textContent.trim(), "—");
+  assert.match(cells[1].textContent, /✓\s*Link/);
+  // PrairieTest cell must link to /pt
+  const ptAnchor = cells[4].querySelector("a.prr-course-link");
+  assert.ok(ptAnchor);
+  assert.equal(ptAnchor.getAttribute("href"), "https://us.prairietest.com/pt");
 });

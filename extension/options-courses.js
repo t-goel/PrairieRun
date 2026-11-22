@@ -73,9 +73,27 @@
   }
 
   async function loadData() {
-    const stored = await globalThis.PrairieRunExt.storageLocalGet([DEADLINES_KEY, LINKS_KEY, COURSES_KEY]);
+    const stored = await globalThis.PrairieRunExt.storageLocalGet([
+      DEADLINES_KEY,
+      LINKS_KEY,
+      COURSES_KEY,
+      "prairierunAssignments",
+    ]);
+    const items = Array.isArray(stored[DEADLINES_KEY]) ? [...stored[DEADLINES_KEY]] : [];
+    if (Array.isArray(stored.prairierunAssignments) && globalThis.PrairieRunModel?.fromLegacyPlAssignment) {
+      const existingIds = new Set(items.map((it) => it?.id));
+      for (const legacy of stored.prairierunAssignments) {
+        try {
+          const item = globalThis.PrairieRunModel.fromLegacyPlAssignment(legacy);
+          if (item && !existingIds.has(item.id)) {
+            items.push(item);
+            existingIds.add(item.id);
+          }
+        } catch { /* skip */ }
+      }
+    }
     return {
-      items: Array.isArray(stored[DEADLINES_KEY]) ? stored[DEADLINES_KEY] : [],
+      items,
       links: migrateStoredLinks(stored[LINKS_KEY] && typeof stored[LINKS_KEY] === "object" ? stored[LINKS_KEY] : {}),
       courses: Array.isArray(stored[COURSES_KEY]) ? stored[COURSES_KEY] : [],
     };
@@ -92,6 +110,16 @@
       if (courses) return `${u.origin}${courses[1]}`;
       // PrairieTest reservations live under /pt/…; course-level home is /pt.
       if (/^\/pt(\/|$)/i.test(u.pathname)) return `${u.origin}/pt`;
+      // UIUC course websites (grainger/courses.illinois.edu, etc.): the saved
+      // page itself is the course home. Skip Canvas hosts already handled above.
+      if (
+        u.protocol === "https:"
+        && u.hostname.endsWith(".illinois.edu")
+        && !/^canvas\./i.test(u.hostname)
+      ) {
+        u.hash = "";
+        return u.href;
+      }
       return null;
     } catch {
       return null;
@@ -117,11 +145,17 @@
   }
 
   // Resolve a cell key (courseKey, courseName, or legacy course-code string)
-  // to a course home URL for that source column.
-  function resolveCourseHref(items, source, key, urlIndex) {
+  // to a course home URL for that source column. Falls back to same-source
+  // items in the row's course family, so a stored key whose own items were
+  // dropped still inherits the family's course home (CS498 key -> CS498DK2 items).
+  function resolveCourseHref(items, source, key, urlIndex, familyCode) {
     if (!key) return null;
+    if (source === "prairietest") {
+      return "https://us.prairietest.com/pt";
+    }
     if (urlIndex?.has(key)) return urlIndex.get(key);
-    const want = normalizeLoose(key);
+    const cleanKey = String(key || "").replace(/^(?:prairielearn|prairietest|canvas|gradescope|courseweb):/, "");
+    const want = normalizeLoose(cleanKey || key);
     for (const item of items || []) {
       if (item?.source !== source) continue;
       if (item.courseKey === key || item.courseName === key || item.courseCode === key) {
@@ -130,9 +164,26 @@
       }
       if (want) {
         const candidates = [item.courseKey, item.courseName, item.courseCode]
-          .map(normalizeLoose)
+          .map((v) => normalizeLoose(String(v || "").replace(/^(?:prairielearn|prairietest|canvas|gradescope|courseweb):/, "")))
           .filter(Boolean);
         if (candidates.includes(want)) {
+          const href = courseHomeUrl(item.url || item.sourceUrl);
+          if (href) return href;
+        }
+      }
+    }
+    if (familyCode) {
+      const familyWant = normalizeLoose(familyCode);
+      const store = globalThis.PrairieRunDeadlineStore;
+      const sameFamily = store && typeof store.sameCourseFamily === "function"
+        ? (code) => store.sameCourseFamily(familyWant, code)
+        : (code) => code === familyWant;
+      for (const item of items || []) {
+        if (item?.source !== source) continue;
+        const candidates = [item.courseCode, item.courseName]
+          .map((v) => normalizeLoose(String(v || "").replace(/^(?:prairielearn|prairietest|canvas|gradescope|courseweb):/, "")))
+          .filter(Boolean);
+        if (candidates.some(sameFamily)) {
           const href = courseHomeUrl(item.url || item.sourceUrl);
           if (href) return href;
         }
@@ -202,9 +253,9 @@
     cell.append(span);
   }
 
-  function firstCourseHref(items, source, keys, urls) {
+  function firstCourseHref(items, source, keys, urls, familyCode) {
     for (const key of keys) {
-      const href = resolveCourseHref(items, source, key, urls);
+      const href = resolveCourseHref(items, source, key, urls, familyCode);
       if (href) return href;
     }
     return null;
@@ -224,6 +275,19 @@
     for (const code of folded.codes) {
       const stored = folded.links[code] || {};
       const proposed = folded.suggested[code] || {};
+      // Pair PrairieLearn and PrairieTest: any class with PrairieLearn has PrairieTest, and vice versa.
+      const hasPl = Boolean(stored.prairielearn?.length || proposed.prairielearn?.length);
+      const hasPt = Boolean(stored.prairietest?.length || proposed.prairietest?.length);
+      if (hasPl || hasPt) {
+        if (!stored.prairielearn?.length && !proposed.prairielearn?.length) {
+          if (!proposed.prairielearn) proposed.prairielearn = [];
+          proposed.prairielearn.push(`prairielearn:${code}`);
+        }
+        if (!stored.prairietest?.length && !proposed.prairietest?.length) {
+          if (!proposed.prairietest) proposed.prairietest = [];
+          proposed.prairietest.push(`prairietest:${code}`);
+        }
+      }
       const row = document.createElement("tr");
       const codeCell = document.createElement("td");
       codeCell.textContent = code;
@@ -237,7 +301,7 @@
           appendPresenceLink(
             cell,
             document,
-            firstCourseHref(items, source, keys, urls),
+            firstCourseHref(items, source, keys, urls, code),
             SOURCE_LABELS[source] || source
           );
         }

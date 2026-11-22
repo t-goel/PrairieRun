@@ -83,6 +83,8 @@ test("options-courseweb mounts and renders saved course pages with remove button
   assert.equal(link.textContent, "https://courses.grainger.illinois.edu/cs425/fa2026/assignments.html");
   const removeBtn = list.querySelector("button");
   assert.ok(removeBtn, "remove button exists");
+  assert.ok(removeBtn.classList.contains("course-website-remove"), "has course-website-remove class");
+  assert.ok(removeBtn.querySelector("svg"), "has trash icon svg");
 
   // Click remove button
   removeBtn.click();

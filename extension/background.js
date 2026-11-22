@@ -455,6 +455,28 @@ async function startScan(sourceTabId) {
   const courseLinks = (home.courseLinks || []).filter((link) => link.href?.startsWith(settings.prairieLearnOrigin));
   debugLog("Course links filtered", { discovered: home.courseLinks?.length || 0, usable: courseLinks.length, origin: settings.prairieLearnOrigin });
   if (!courseLinks.length) throw new Error("No PrairieLearn classes were found. Confirm that you are logged in.");
+  const plCourses = courseLinks.map((link) => {
+    const rawText = link.text || "";
+    const store = globalThis.PrairieRunDeadlineStore;
+    const code = store?.normalizeCourseCode ? store.normalizeCourseCode(rawText) : null;
+    const url = `${link.href.replace(/\/$/, "")}/assessments`;
+    return {
+      id: String(link.courseInstanceId || ""),
+      source: "prairielearn",
+      courseKey: `prairielearn:${link.courseInstanceId}`,
+      courseCode: code,
+      courseName: rawText,
+      url,
+    };
+  });
+  if (plCourses.length) {
+    try {
+      const existingStored = await PrairieRunExt.storageLocalGet("prairierunCourses");
+      const existing = Array.isArray(existingStored?.prairierunCourses) ? existingStored.prairierunCourses : [];
+      const nonPl = existing.filter((c) => c?.source !== "prairielearn");
+      await PrairieRunExt.storageLocalSet({ prairierunCourses: [...nonPl, ...plCourses] });
+    } catch { /* best-effort */ }
+  }
   const allAssignments = [];
   for (let index = 0; index < courseLinks.length; index += 1) {
     const url = `${courseLinks[index].href.replace(/\/$/, "")}/assessments`;

@@ -35,7 +35,44 @@
           // Skip malformed legacy rows without failing the whole source.
         }
       }
-      return { status: "ok", items, checkedAt: new Date().toISOString() };
+      // Emit one enrolled-course row per course instance so Course Links keeps
+      // PrairieLearn cells even when a family fold drops the live item set.
+      const coursesByKey = new Map();
+      for (const item of items) {
+        const key = item?.courseKey;
+        if (!key || coursesByKey.has(key)) continue;
+        const match = String(key).match(/^prairielearn:(\d+)$/);
+        const id = match ? match[1] : key;
+        let url = item.url || "";
+        try {
+          const parsed = new URL(url);
+          const home = parsed.pathname.match(/^(\/pl\/course_instance\/\d+)/i);
+          if (home) url = `${parsed.origin}${home[1]}/assessments`;
+        } catch { /* keep assignment url */ }
+        coursesByKey.set(key, {
+          id,
+          source: "prairielearn",
+          courseKey: key,
+          courseCode: item.courseCode || null,
+          courseName: item.courseName || item.courseCode || "",
+          url,
+        });
+      }
+      try {
+        const storedCourses = await globalThis.PrairieRunExt?.storageLocalGet?.("prairierunCourses");
+        const savedCourses = Array.isArray(storedCourses?.prairierunCourses) ? storedCourses.prairierunCourses : [];
+        for (const sc of savedCourses) {
+          if (sc?.source === "prairielearn" && sc?.courseKey && !coursesByKey.has(sc.courseKey)) {
+            coursesByKey.set(sc.courseKey, sc);
+          }
+        }
+      } catch { /* best-effort */ }
+      return {
+        status: "ok",
+        items,
+        courses: [...coursesByKey.values()],
+        checkedAt: new Date().toISOString(),
+      };
     },
   };
 
