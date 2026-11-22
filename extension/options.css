@@ -225,6 +225,7 @@ button.secondary {
   vertical-align: middle;
   border: 2px solid var(--ink);
   box-shadow: 2px 2px 0 var(--ink);
+  transform: translateY(-1px);
   transition: transform .05s ease, box-shadow .05s ease;
 }
 .auth-buttons button.primary {
@@ -236,17 +237,13 @@ button.secondary {
   color: var(--ink);
   text-decoration: none;
 }
-.auth-buttons button.secondary:hover:not(:disabled) {
-  background: var(--wash);
-  transform: translate(1px, 1px);
-  box-shadow: 1px 1px 0 var(--ink);
-}
+.auth-buttons button.secondary:hover:not(:disabled),
 .auth-buttons button.primary:hover:not(:disabled) {
-  transform: translate(1px, 1px);
+  transform: translate(0, 0);
   box-shadow: 1px 1px 0 var(--ink);
 }
 .auth-buttons button:active:not(:disabled) {
-  transform: translate(2px, 2px);
+  transform: translate(1px, 1px);
   box-shadow: 0 0 0 var(--ink);
 }
 .card .auth-buttons button.icon-button,
@@ -437,13 +434,16 @@ button.sync-now { width: auto; padding: 7px 10px; font-size: 11px; }
   gap: 8px;
   margin-top: 0;
 }
+.card .course-websites-add input,
 .course-websites-add input {
   flex: 1;
   min-width: 0;
-  margin-top: 0;
+  margin: 0 !important;
+  margin-top: 0 !important;
   height: 36px;
   box-sizing: border-box;
 }
+.card .course-websites-add button,
 .course-websites-add button {
   flex: 0 0 auto;
   width: 36px;
@@ -455,6 +455,19 @@ button.sync-now { width: auto; padding: 7px 10px; font-size: 11px; }
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
+  box-shadow: 2px 2px 0 var(--ink);
+  transform: translateY(-1px);
+  transition: transform .05s ease, box-shadow .05s ease;
+}
+.card .course-websites-add button:hover:not(:disabled),
+.course-websites-add button:hover:not(:disabled) {
+  transform: translate(0, 0);
+  box-shadow: 1px 1px 0 var(--ink);
+}
+.card .course-websites-add button:active:not(:disabled),
+.course-websites-add button:active:not(:disabled) {
+  transform: translate(1px, 1px);
+  box-shadow: 0 0 0 var(--ink);
 }
 .course-websites-add button svg {
   display: block;
