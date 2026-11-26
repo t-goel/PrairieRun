@@ -8,8 +8,8 @@
   const FEED_AUTH_KEY = "prairierunFeedAuth";
   const SESSION_TOKEN_KEY = "prairierunFeedAuthToken";
 
-  const DEFAULT_CONVEX_SITE_URL = "https://moonlit-mink-208.convex.site";
-  const DEFAULT_CONVEX_CLOUD_URL = "https://moonlit-mink-208.convex.cloud";
+  const DEFAULT_CONVEX_SITE_URL = "https://admired-wildebeest-287.convex.site";
+  const DEFAULT_CONVEX_CLOUD_URL = "https://admired-wildebeest-287.convex.cloud";
   const DEFAULT_RELAY_URL = "https://prairierun-feed.vercel.app";
 
   // A disabled Convex deployment answers every request with an opaque

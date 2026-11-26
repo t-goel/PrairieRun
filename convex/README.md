@@ -45,21 +45,21 @@ npx convex env set AUTH_GOOGLE_ID <your-google-oauth-client-id>
 npx convex env set AUTH_GOOGLE_SECRET <your-google-oauth-client-secret>
 
 # Site URL for your Convex deployment
-npx convex env set SITE_URL https://moonlit-mink-208.convex.site
+npx convex env set SITE_URL https://admired-wildebeest-287.convex.site
 ```
 
-Production deployment (team `neel-kumar`, project `prairierun-feed`):
-- Cloud: `https://moonlit-mink-208.convex.cloud`
-- Site: `https://moonlit-mink-208.convex.site`
-- Dashboard: `https://dashboard.convex.dev/t/neel-kumar/prairierun-feed/moonlit-mink-208`
+Production deployment (team `neel-kumar-17000`, project `prairierun-feed`):
+- Cloud: `https://admired-wildebeest-287.convex.cloud`
+- Site: `https://admired-wildebeest-287.convex.site`
+- Dashboard: `https://dashboard.convex.dev/t/neel-kumar-17000/prairierun-feed/admired-wildebeest-287`
 
-Dev deployment: `https://decisive-perch-472.convex.site`
+Dev deployment: `https://giant-eel-548.convex.site`
 
 ### 3. Google Cloud Console OAuth Configuration
 
 1. In the Google Cloud Console, navigate to **APIs & Services > Credentials**.
 2. Under your OAuth 2.0 Web Application Client, add the following to **Authorized redirect URIs**:
-   - `https://moonlit-mink-208.convex.site/api/auth/callback/google`
+   - `https://admired-wildebeest-287.convex.site/api/auth/callback/google`
 3. Convex Auth will handle the Google OAuth handshake and redirect back to the extension via `PrairieRunExt.identityLaunchWebAuthFlow` (format: `https://<extension-id>.chromiumapp.org/convex`).
 
 ### 4. Vercel Relay Alignment

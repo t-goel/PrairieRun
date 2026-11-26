@@ -184,13 +184,13 @@ finish() {
 # Replace the example below. Set TOTAL_STAGES to match the stages you write.
 # ──────────────────────────────────────────────────────────────────────────
 
-# Repo root + local env file (gitignored). Convex prod is moonlit-mink-208.
+# Repo root + local env file (gitignored). Convex prod is admired-wildebeest-287.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 ENV_FILE="$ROOT/.env.local"
-CONVEX_SITE_URL="https://moonlit-mink-208.convex.site"
+CONVEX_SITE_URL="https://admired-wildebeest-287.convex.site"
 CONVEX_CALLBACK="${CONVEX_SITE_URL}/api/auth/callback/google"
-CONVEX_DASHBOARD="https://dashboard.convex.dev/t/neel-kumar/prairierun-feed/moonlit-mink-208"
+CONVEX_DASHBOARD="https://dashboard.convex.dev/t/neel-kumar-17000/prairierun-feed/admired-wildebeest-287"
 
 # Push one env var to Convex production. Records SKIPPED on failure.
 set_convex_env() {
@@ -267,7 +267,7 @@ fi
 write_env AUTH_GOOGLE_SECRET "$AUTH_GOOGLE_SECRET"
 
 stage "Push credentials to Convex prod"
-say "Extension defaults point at moonlit-mink-208. These three env vars must be set there."
+say "Extension defaults point at admired-wildebeest-287. These three env vars must be set there."
 note "Dashboard: $CONVEX_DASHBOARD"
 note "Local copies are already in $ENV_FILE"
 if confirm "Set AUTH_GOOGLE_ID, AUTH_GOOGLE_SECRET, and SITE_URL on Convex prod now?"; then
@@ -284,7 +284,7 @@ say "Convex should now mint a Google URL with a real client_id (not undefined)."
 if confirm "Run the smoke check against $CONVEX_SITE_URL now?"; then
   local_probe_out=""
   if local_probe_out=$(node -e '
-const cloud="https://moonlit-mink-208.convex.cloud";
+const cloud="https://admired-wildebeest-287.convex.cloud";
 const redirect="https://abcdefghijklmnopqrstuvwxyz.chromiumapp.org/convex";
 (async()=>{
   const start=await fetch(cloud+"/api/action",{
