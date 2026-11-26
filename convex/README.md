@@ -2,6 +2,13 @@
 
 This directory contains the Convex backend for PrairieRun multi-device feed identity.
 
+If queries/mutations return "deployments have been disabled" or Free plan
+limits, open [dashboard.convex.dev](https://dashboard.convex.dev) and upgrade
+or reduce usage. No code change can re-enable a disabled deployment. The
+extension treats that as an outage: Convex calls return a result instead of
+throwing, the dashboard shows a banner, and locally stored feed credentials
+keep the ICS feed usable. See `extension/feed-auth.js`.
+
 ## Architecture
 
 - **Account Layer**: Convex Auth with Google OAuth (`@convex-dev/auth`).

@@ -138,6 +138,19 @@ URL" uses the claim endpoint against `PrairieRunRelay.DEFAULT_RELAY_URL`
 unless a custom relay is configured. Users subscribe to the URL in any
 calendar app, which keeps due dates current with no Google OAuth involvement.
 
+### Convex outage resilience
+
+`extension/feed-auth.js` is the only Convex client. Its `safeConvexRequest`
+boundary converts failed actions/mutations into `{ ok: false, outage, error }`
+rather than rejecting, and records a shared outage state that the Calendar feed
+card subscribes to for its banner. Disabled deployments, Free-plan limits, and
+network failures are classified as outages; raw `[Request ID: ...]` text is
+never shown. `authenticateAndHydrate` and `refreshFeedCredentials` return
+degraded results, leave `prairierunSettings.relay` and
+`prairierunSecrets.relayPublishKey` untouched on failure, and clear the outage
+after a successful refresh. The anonymous relay path (`/api/claim` +
+`/api/publish`) has no Convex dependency, so the feed keeps working.
+
 ## Multi-source scaffold (PR 1, no behavior change)
 
 PR 1 adds the `DeadlineItem` normalized model (`extension/deadline-model.js`,

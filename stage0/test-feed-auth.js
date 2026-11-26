@@ -39,6 +39,7 @@ function installMockExt() {
     removeSessionValue: async (key) => sessionStore.delete(key),
   };
 
+  if (globalThis.PrairieRunFeedAuth) globalThis.PrairieRunFeedAuth.clearOutage();
   return { store, sessionStore };
 }
 
@@ -201,4 +202,92 @@ test("signOut clears session token and removes authAccount tag", async () => {
   // Auth status now reports not signed in
   const status = await feedAuth.getAuthStatus();
   assert.equal(status.signedIn, false);
+});
+
+test("classifyConvexFailure identifies a disabled deployment without leaking request IDs", () => {
+  const outage = feedAuth.classifyConvexFailure(
+    new Error("[Request ID: 1234] Server Error")
+  );
+  assert.equal(outage.outage, true);
+  assert.equal(/Request ID/.test(outage.message), false);
+
+  const network = feedAuth.classifyConvexFailure(new Error("Failed to fetch"));
+  assert.equal(network.outage, true);
+
+  const userError = feedAuth.classifyConvexFailure(new Error("Google sign-in was cancelled."));
+  assert.equal(userError.outage, false);
+});
+
+test("safeConvexRequest never throws and publishes the outage state", async () => {
+  installMockExt();
+  const seen = [];
+  const unsubscribe = feedAuth.subscribeToOutage((state) => seen.push(state));
+
+  const result = await feedAuth.safeConvexRequest(() =>
+    Promise.reject(new Error("[Request ID: 9] Server Error"))
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.outage, true);
+  assert.equal(feedAuth.getOutageState().active, true);
+  assert.ok(seen.length > 0 && seen[seen.length - 1].active === true);
+
+  unsubscribe();
+  feedAuth.clearOutage();
+  assert.equal(feedAuth.getOutageState().active, false);
+});
+
+test("refreshFeedCredentials preserves local feed credentials during a Convex outage", async () => {
+  const env = installMockExt();
+  env.sessionStore.set("prairierunFeedAuthToken", "session-token-123");
+  env.store.set("prairierunSettings", {
+    relay: {
+      enabled: true,
+      feedId: "feed-local-123",
+      relayUrl: "https://prairierun-feed.vercel.app",
+      authAccount: "google",
+    },
+  });
+  env.store.set("prairierunSecrets", { relayPublishKey: "local-key-123" });
+
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 503,
+    text: async () => "[Request ID: abc] Server Error",
+  });
+
+  const result = await feedAuth.refreshFeedCredentials();
+  assert.equal(result.ok, false);
+  assert.equal(result.outage, true);
+  assert.equal(result.degraded, true);
+  assert.equal(feedAuth.getOutageState().active, true);
+
+  // Degrade safely: the anonymous/signed-in feed already on disk stays usable.
+  assert.equal(env.store.get("prairierunSettings").relay.feedId, "feed-local-123");
+  assert.equal(env.store.get("prairierunSecrets").relayPublishKey, "local-key-123");
+});
+
+test("authenticateAndHydrate returns a degraded result instead of throwing when Convex is disabled", async () => {
+  const env = installMockExt();
+  env.store.set("prairierunSettings", {
+    relay: { enabled: true, feedId: "feed-anon-123", relayUrl: "https://prairierun-feed.vercel.app" },
+  });
+  env.store.set("prairierunSecrets", { relayPublishKey: "anon-key-123" });
+
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 503,
+    text: async () => "You have exceeded the free plan limits, so your deployments have been disabled.",
+  });
+
+  const result = await feedAuth.authenticateAndHydrate();
+  assert.equal(result.ok, false);
+  assert.equal(result.outage, true);
+  assert.equal(result.degraded, true);
+
+  // The anonymous feed must not be replaced or partially rewritten.
+  const settings = env.store.get("prairierunSettings");
+  assert.equal(settings.relay.feedId, "feed-anon-123");
+  assert.equal(settings.relay.authAccount, undefined);
+  assert.equal(env.store.get("prairierunSecrets").relayPublishKey, "anon-key-123");
 });
