@@ -12,8 +12,94 @@
   const DEFAULT_CONVEX_CLOUD_URL = "https://moonlit-mink-208.convex.cloud";
   const DEFAULT_RELAY_URL = "https://prairierun-feed.vercel.app";
 
+  // A disabled Convex deployment answers every request with an opaque
+  // `[Request ID: ...] Server Error`. Treat that (and network failure) as an
+  // outage: return a result instead of throwing, show it in the dashboard, and
+  // leave locally stored feed data untouched so the ICS feed keeps working.
+  const OUTAGE_RE = /exceeded the free plan limits|deployments? (?:have been |has been )?disabled|Server Error|Request ID/i;
+  const NETWORK_RE = /failed to fetch|networkerror|load failed|could not reach|timeout|aborted/i;
+  const OUTAGE_MESSAGE = "Live feed sync is paused: the PrairieRun sign-in service is unavailable. Your existing feed keeps working.";
+  const NETWORK_MESSAGE = "Could not reach the PrairieRun sign-in service. Your existing feed keeps working.";
+
+  const outageState = { active: false, message: null, reason: null, checkedAt: 0 };
+  const outageListeners = new Set();
+
   function ext() {
     return globalThis.PrairieRunExt || null;
+  }
+
+  // Classify a Convex failure without ever throwing. Raw request IDs and stack
+  // detail never reach the UI; callers get one short, actionable sentence.
+  function classifyConvexFailure(error) {
+    const text = String(error?.message || error || "");
+    if (NETWORK_RE.test(text)) {
+      return { outage: true, message: NETWORK_MESSAGE };
+    }
+    if (OUTAGE_RE.test(text)) {
+      return { outage: true, message: OUTAGE_MESSAGE };
+    }
+    return {
+      outage: false,
+      message: text.trim() && text.length <= 160 ? text.trim() : "Something went wrong. Try again in a minute.",
+    };
+  }
+
+  function emitOutage() {
+    const snapshot = getOutageState();
+    for (const listener of [...outageListeners]) {
+      try {
+        listener(snapshot);
+      } catch { /* listeners are best effort */ }
+    }
+  }
+
+  function getOutageState() {
+    return {
+      active: outageState.active,
+      message: outageState.message,
+      reason: outageState.reason,
+      checkedAt: outageState.checkedAt,
+    };
+  }
+
+  function reportOutage(error, fallbackMessage) {
+    const info = classifyConvexFailure(error);
+    if (info.outage) {
+      outageState.active = true;
+      outageState.message = fallbackMessage || info.message;
+      outageState.reason = String(error?.message || error || "");
+      outageState.checkedAt = Date.now();
+      emitOutage();
+    }
+    return info;
+  }
+
+  function clearOutage() {
+    if (!outageState.active) return;
+    outageState.active = false;
+    outageState.message = null;
+    outageState.reason = null;
+    outageState.checkedAt = Date.now();
+    emitOutage();
+  }
+
+  function subscribeToOutage(listener) {
+    if (typeof listener !== "function") return () => {};
+    outageListeners.add(listener);
+    return () => outageListeners.delete(listener);
+  }
+
+  // The shared non-throwing boundary for Convex calls. `call` is a zero-arg
+  // function so callers can pass either an action or a mutation. Success and
+  // failure both come back as data; UI code never needs a try/catch.
+  async function safeConvexRequest(call, fallbackMessage) {
+    try {
+      const data = await call();
+      return { ok: true, data };
+    } catch (error) {
+      const info = reportOutage(error, fallbackMessage);
+      return { ok: false, outage: info.outage, error: info.message };
+    }
   }
 
   function resolveConvexUrls(input) {
@@ -166,7 +252,18 @@
     return { token, cloudUrl, siteUrl };
   }
 
-  async function authenticateAndHydrate({ convexUrl, relayUrl } = {}) {
+  // Never reject to callers: a disabled backend must leave the local feed
+  // intact and report a degraded result the dashboard can display.
+  async function authenticateAndHydrate(options = {}) {
+    try {
+      return await hydrateFeedAuth(options);
+    } catch (error) {
+      const info = reportOutage(error);
+      return { ok: false, degraded: true, outage: info.outage, error: info.message };
+    }
+  }
+
+  async function hydrateFeedAuth({ convexUrl, relayUrl } = {}) {
     const api = ext();
     if (!api) throw new Error("PrairieRunExt is unavailable.");
 
@@ -243,6 +340,69 @@
     };
   }
 
+  // Re-read feed credentials with the cached session token (no Google popup).
+  // Used when a signed-in publish fails with a stale key. On a Convex outage it
+  // returns a result object and does not touch the existing feed credentials,
+  // so options-feed.js can fall back to the anonymous relay path.
+  async function refreshFeedCredentials({ convexUrl, relayUrl } = {}) {
+    const api = ext();
+    if (!api) return { ok: false, error: "PrairieRun is unavailable in this context." };
+    if (typeof api.getSessionValue !== "function") {
+      return { ok: false, error: "Sign in with Google to refresh your feed." };
+    }
+
+    let token;
+    try {
+      token = await api.getSessionValue(SESSION_TOKEN_KEY);
+    } catch {
+      return { ok: false, error: "Could not read your sign-in session." };
+    }
+    if (!token) return { ok: false, error: "Sign in with Google to refresh your feed." };
+
+    const { cloudUrl } = resolveConvexUrls(convexUrl);
+    const result = await safeConvexRequest(
+      () => callConvexMutation(cloudUrl, token, "feeds:getOrCreateFeed", {}),
+      "Could not refresh your feed. Your existing feed stays available."
+    );
+    if (!result.ok) {
+      return { ok: false, degraded: true, outage: Boolean(result.outage), error: result.error };
+    }
+
+    const feedId = result.data?.feedId;
+    const key = result.data?.key;
+    if (!feedId || !key) {
+      return { ok: false, error: "The feed service did not return credentials. Your existing feed stays available." };
+    }
+
+    try {
+      const stored = (await api.storageLocalGet?.([SETTINGS_KEY, SECRETS_KEY])) || {};
+      const settings = stored[SETTINGS_KEY] && typeof stored[SETTINGS_KEY] === "object" ? stored[SETTINGS_KEY] : {};
+      const secrets = stored[SECRETS_KEY] && typeof stored[SECRETS_KEY] === "object" ? stored[SECRETS_KEY] : {};
+      const currentRelay = settings.relay && typeof settings.relay === "object" ? settings.relay : {};
+      const nextRelay = {
+        ...currentRelay,
+        enabled: true,
+        feedId,
+        relayUrl: currentRelay.relayUrl || relayUrl || DEFAULT_RELAY_URL,
+        authAccount: "google",
+      };
+      await api.storageLocalSet?.({
+        [SETTINGS_KEY]: { ...settings, relay: nextRelay },
+        [SECRETS_KEY]: { ...secrets, relayPublishKey: key },
+        [FEED_AUTH_KEY]: {
+          signedIn: true,
+          authAccount: "google",
+          signedInAt: Date.now(),
+        },
+      });
+      clearOutage();
+      return { ok: true, feedId, key, relayUrl: nextRelay.relayUrl };
+    } catch (error) {
+      const info = reportOutage(error);
+      return { ok: false, degraded: true, outage: info.outage, error: info.message };
+    }
+  }
+
   async function signOut({ convexUrl } = {}) {
     const api = ext();
     if (!api) return { ok: true };
@@ -306,8 +466,14 @@
     DEFAULT_RELAY_URL,
     resolveConvexUrls,
     getRedirectUrl,
+    classifyConvexFailure,
+    getOutageState,
+    subscribeToOutage,
+    clearOutage,
+    safeConvexRequest,
     signInWithGoogle,
     authenticateAndHydrate,
+    refreshFeedCredentials,
     signOut,
     getAuthStatus,
     callConvexAction,

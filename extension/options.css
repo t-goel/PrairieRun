@@ -784,6 +784,17 @@ button.source-action { width: 100%; padding: 6px 10px; font-size: 11px; margin-t
   padding-bottom: 6px;
 }
 .prr-feed-actions button { margin: 0; width: auto; }
+.prr-feed-outage {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 2px solid var(--warn);
+  background: #fff6da;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.prr-feed-outage[hidden] { display: none !important; }
 .prr-feed-url-row { margin: 0 0 10px; }
 [data-prr-feed-status] {
   margin: 12px 0 0;

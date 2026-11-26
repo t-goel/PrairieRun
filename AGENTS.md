@@ -123,6 +123,13 @@ per-project change). `auth-utils.js` is the pure error-classification helper
   `prairierunSecrets.relayPublishKey`, `prairierunRelayStatus`), and the feed
   URL is the subscription target for any calendar app. Never send users
   through Google Cloud Console as part of normal setup.
+- Convex outage resilience: all Convex calls from the extension go through the
+  non-throwing boundary in `extension/feed-auth.js` (`safeConvexRequest`), which
+  returns `{ ok, data | error | outage }` instead of rejecting. A disabled
+  deployment or network failure sets a shared outage state; the Calendar feed
+  card shows an amber banner and keeps the anonymous feed, Copy URL, and local
+  deadlines working. Failed sign-in/refresh must never overwrite stored feed
+  credentials, and a successful refresh clears the outage.
 - Direct Google Calendar sync (OAuth) is temporarily hidden in the UI
   (`#auth-card` on the dashboard, home-panel Connect footer) and skipped in
   the background (`DIRECT_GOOGLE_SYNC_ENABLED = false` in `background.js`).

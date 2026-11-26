@@ -87,7 +87,9 @@ agent-facing project rules.
   every successful sync. Custom relays live in a collapsed "Use a custom
   relay" details. No Google Cloud Console work is ever part of ordinary
   setup, and there are no manual .ics download buttons (the feed replaces
-  them).
+  them). If the Convex sign-in service is disabled or unreachable, the card
+  shows a short amber notice; the local feed URL, copy action, and deadlines
+  stay usable and failed sign-in never discards existing feed credentials.
 - Google Calendar card (optional path): temporarily hidden. When restored,
   Connect/Disconnect should remain available; when the OAuth client is not
   configured on the device, the card should say so and point at the Calendar

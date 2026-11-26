@@ -13,6 +13,7 @@
   const COURSE_FEEDS_KEY = "prairierunCourseFeeds";
   const FALLBACK_RELAY_URL = "https://prairierun-feed.vercel.app";
   const CLAIM_HELP = "Could not reach the PrairieRun feed relay. Try again in a minute.";
+  let outageUnsubscribe = null;
 
   function isSubscriptionUrl(value) {
     const url = String(value || "").trim();
@@ -206,6 +207,10 @@
     const mount = section.id === "calendar-feed"
       ? section
       : (section.querySelector("#calendar-feed") || section);
+    if (outageUnsubscribe) {
+      try { outageUnsubscribe(); } catch { /* stale listener */ }
+      outageUnsubscribe = null;
+    }
     mount.querySelectorAll("[data-prr-feed]").forEach((node) => node.remove());
     for (const note of mount.querySelectorAll("p.muted")) {
       if (/coming soon/i.test(note.textContent || "")) note.remove();
@@ -220,6 +225,26 @@
     }
     const feedAuthApi = auth();
     const defaultRelayUrl = relayApi.DEFAULT_RELAY_URL || FALLBACK_RELAY_URL;
+
+    // Convex outage notice. It only appears after a real Convex failure; the
+    // anonymous feed, Copy URL action, and local deadlines keep working.
+    const outageBanner = make("div", {
+      className: "prr-feed-outage",
+      "data-prr-convex-outage": "1",
+      role: "status",
+      hidden: "hidden",
+    });
+    function syncOutageBanner(state) {
+      const info = state || (feedAuthApi?.getOutageState?.() || null);
+      outageBanner.hidden = !(info && info.active);
+      outageBanner.textContent = info && info.active
+        ? (info.message || "Live feed sync is temporarily unavailable.")
+        : "";
+    }
+    syncOutageBanner();
+    if (feedAuthApi && typeof feedAuthApi.subscribeToOutage === "function") {
+      outageUnsubscribe = feedAuthApi.subscribeToOutage(syncOutageBanner);
+    }
 
     // ICS export: subscription URL, inline Copy feed URL action, and this
     // section's own status line. The Google sign-in lives in the dashboard's
@@ -250,7 +275,7 @@
     // other option on the Google Calendar section above; device linking is
     // not offered here.
     const label = make("p", { className: "muted calendar-feed-label" }, "Export iCS to any app without sign-in");
-    root.append(label, urlRow, courseFeedsList, actions, statusLine);
+    root.append(outageBanner, label, urlRow, courseFeedsList, actions, statusLine);
 
     // Mint/repair feed credentials, publish, return subscription URL or "".
     async function ensureFeedUrl() {
